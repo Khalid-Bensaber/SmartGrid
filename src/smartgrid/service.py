@@ -1,6 +1,5 @@
-from smartgrid.model_loader import load_model
-from smartgrid.predict import run_prediction
-
+from src.smartgrid.model_loader import load_model
+from src.smartgrid.predict import run_prediction
 def predict_conso():
     print("🔥 MODEL EXECUTION 🔥")
 
