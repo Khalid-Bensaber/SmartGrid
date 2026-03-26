@@ -2,7 +2,7 @@ import pandas as pd
 
 def load_data():
     # 🔹 Charger le bon fichier
-    df = pd.read_csv("data/historique.csv", sep=",")
+    df = pd.read_csv("../data/historique.csv", sep=",")
 
     # 🔍 DEBUG (tu peux enlever après)
     print("Colonnes:", df.columns)
