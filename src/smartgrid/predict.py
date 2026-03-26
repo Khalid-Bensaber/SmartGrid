@@ -1,17 +1,17 @@
 import numpy as np
+from src.smartgrid.data_loader import load_data
 
 def run_prediction(model):
-    # 👉 données de test (tu peux changer plus tard)
-    data = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    # 👉 récupérer les données
+    data = load_data()
 
-    # 👉 convertir en numpy
-    data = np.array(data)
-
-    # 👉 reshape pour correspondre au modèle (batch, time_steps, features)
+    # 👉 reshape pour modèle
     data = data.reshape(1, 1, -1)
 
     # 👉 prédiction
     prediction = model.predict(data)
 
-    # 👉 convertir en liste pour JSON
-    return prediction.tolist()
+    return {
+        "status": "ok",
+        "prediction": prediction.tolist()
+    }
