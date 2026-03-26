@@ -1,11 +1,6 @@
-from src.smartgrid.model_loader import load_model
-from smartgrid.predict import run_prediction
-
 def predict_conso():
-    model = load_model()
-    result = run_prediction(model)
-
+    print("🔥 SERVICE EXECUTÉ 🔥")
     return {
         "status": "ok",
-        "prediction": result
+        "prediction": [999]
     }
