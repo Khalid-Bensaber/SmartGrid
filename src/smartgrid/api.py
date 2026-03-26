@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from smartgrid.service import predict_conso
+from src.smartgrid.service import predict_conso
 
 app = FastAPI()
 
