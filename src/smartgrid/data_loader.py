@@ -1,13 +1,30 @@
 import pandas as pd
-import numpy as np
 
 def load_data():
-    df = pd.read_csv("data/raw/historique.csv")
+    # 🔹 Charger le bon fichier
+    df = pd.read_csv("data/historique.csv", sep=",")
 
-    df = df.select_dtypes(include=[np.number])
+    # 🔍 DEBUG (tu peux enlever après)
+    print("Colonnes:", df.columns)
+    print("Shape df:", df.shape)
 
+    # 🔹 Supprimer colonnes inutiles
+    if "name" in df.columns:
+        df = df.drop(columns=["name"])
+    if "Date" in df.columns:
+        df = df.drop(columns=["Date"])
+
+    # 🔹 Garder seulement les colonnes numériques
+    df = df.select_dtypes(include=["number"])
+
+    print("Shape après nettoyage:", df.shape)
+
+    # 🔹 Prendre dernière ligne
     data = df.iloc[-1].values
 
-    data = data[:15]
+    # 🔹 Adapter au modèle (15 features attendues)
+    data = data.reshape(1, 1, len(data))
 
-    return data.astype(np.float32)
+    print("Shape final envoyé au modèle:", data.shape)
+
+    return data
