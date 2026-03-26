@@ -7,5 +7,5 @@ def load_model():
 
     print("MODEL PATH:", model_path)
 
-    model = tf.keras.models.load_model(model_path)
+    model = tf.keras.models.load_model(model_path, compile=False)
     return model
