@@ -1,4 +1,4 @@
-experiment_name: consumption_mlp_baseline
+experiment_name: consumption_mlp_no_temp
 problem: consumption
 
 data:
@@ -16,7 +16,7 @@ split:
 
 features:
   include_calendar: true
-  include_temperature: true
+  include_temperature: false
   include_manual_daily_lags: true
   include_cyclical_time: false
   include_lag_aggregates: false

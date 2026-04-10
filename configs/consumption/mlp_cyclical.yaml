@@ -1,4 +1,4 @@
-experiment_name: consumption_mlp_baseline
+experiment_name: consumption_mlp_cyclical
 problem: consumption
 
 data:
@@ -18,7 +18,7 @@ features:
   include_calendar: true
   include_temperature: true
   include_manual_daily_lags: true
-  include_cyclical_time: false
+  include_cyclical_time: true
   include_lag_aggregates: false
   lag_days: [7, 1, 2, 3, 4, 5, 6]
 

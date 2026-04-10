@@ -66,7 +66,12 @@ def main() -> None:
         special_dates=special_dates,
         date_col=data_cfg["date_col"],
         target_col=data_cfg.get("target_name", DEFAULT_TARGET_NAME),
-        lag_days=feat_cfg["lag_days"],
+        lag_days=feat_cfg.get("lag_days", [7, 1, 2, 3, 4, 5, 6]),
+        include_calendar=feat_cfg.get("include_calendar", True),
+        include_temperature=feat_cfg.get("include_temperature", True),
+        include_manual_daily_lags=feat_cfg.get("include_manual_daily_lags", True),
+        include_cyclical_time=feat_cfg.get("include_cyclical_time", False),
+        include_lag_aggregates=feat_cfg.get("include_lag_aggregates", False),
     )
 
     train_df, val_df, test_df = make_splits(
@@ -146,6 +151,7 @@ def main() -> None:
         "backend": "pytorch",
         "device": str(device),
         "feature_columns": feature_cols,
+        "feature_config": feat_cfg,
         "hidden_layers": list(hidden_layers),
         "train_duration_sec": train_duration_sec,
         "metrics_basic": basic_metrics,
