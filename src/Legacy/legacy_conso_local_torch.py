@@ -92,7 +92,7 @@ def parse_args():
         type=str,
         default="data/processed/conso/2025-12-02_10_15_previsions_data_conso_prev_ptot_clean.csv",
     )
-    p.add_argument("--output-dir", type=str, default="data/processed/conso")
+    p.add_argument("--output-dir", type=str, default="artifacts/legacy/consumption")
     p.add_argument("--output-filename", type=str, default="legacy_local_prev_ptot_clean.csv")
     p.add_argument("--date-col", type=str, default="Date")
 

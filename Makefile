@@ -3,6 +3,15 @@ PYTHON ?= python
 install:
 	uv sync --all-groups
 
+install-core:
+	uv sync
+
+install-dev:
+	uv sync --group dev
+
+install-dev-legacy:
+	uv sync --all-groups
+
 lint:
 	ruff check src tests scripts
 

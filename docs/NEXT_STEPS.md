@@ -26,9 +26,5 @@
 - `lag_days = [7,1,2,3,4,5,6]`, hidden `[1024,512]`, dropout `0.1`
 
 ## 4. Strict rule from now on
-Do not add new forecasting code in:
-- `src/smart_grid/`
-- `src/smartgrid/api.py` old flat style
-- `src/smartgrid/service.py` old flat style
-
-All new work must go into the modular folders.
+All new forecasting code must go into the modular `src/smartgrid/` package.
+`src/Legacy/` stays available for historical and dev-only work, but it is not the path to extend for the current production-oriented pipeline.

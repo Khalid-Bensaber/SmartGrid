@@ -3,6 +3,7 @@
 ## What was done
 - Kept `src/Legacy/legacy_conso_local_torch.py` as the historical reference.
 - Canonized `src/smartgrid/` as the only package to extend.
+- Separated input datasets under `data/processed/` from generated outputs under `artifacts/`.
 - Rebuilt the consumption pipeline into modules:
   - loading
   - feature engineering

@@ -1,0 +1,76 @@
+# Python bytecode and extension modules
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments and local Python tooling
+.venv/
+venv/
+env/
+.python-version.local
+
+# Test, lint, and type-check caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.nox/
+.tox/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Windows alternate data streams copied into the repo
+*.Zone.Identifier
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Project data stays local by default
+data/raw/*
+data/interim/*
+data/processed/*
+data/external/*
+
+# Keep folder placeholders
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/external/.gitkeep
+
+# Training outputs and experiment artifacts
+artifacts/
+models/
+logs/
+runs/
+mlruns/
+tensorboard/
+
+# Packaging / build outputs
+dist/
+build/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Local temp and debug files
+*.log
+*.out
+*.err
+*.pid
+*.tmp

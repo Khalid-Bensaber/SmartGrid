@@ -12,7 +12,6 @@ The repo is now centered on a **clean consumption forecasting pipeline**:
 
 ## Canonical Python package
 Use `src/smartgrid/` as the single canonical package.
-The older `src/smart_grid/` path is deprecated and should not receive new code.
 
 ## Quick start
 ```bash
@@ -22,15 +21,28 @@ python scripts/promote_consumption_run.py --run-id <RUN_ID>
 uvicorn smartgrid.api:app --reload
 ```
 
+## Dependency groups
+- Core runtime: `uv sync`
+- Core + dev tooling: `uv sync --group dev`
+- Core + dev + legacy TensorFlow tooling: `uv sync --all-groups`
+
+The `legacy` dependency group is intentionally kept for local development around `src/Legacy/`.
+It is not part of the production inference path.
+
 ## Main commands
 ```bash
 make install
+make install-core
+make install-dev
+make install-dev-legacy
 make test
 make train-consumption
 make serve-api
 ```
 
 ## Repo layout
+- `data/processed`: input datasets only
+- `artifacts/`: model files, exports, run summaries, backtests and other generated outputs
 - `src/smartgrid/data`: loading and temporal splits
 - `src/smartgrid/features`: feature engineering
 - `src/smartgrid/models`: PyTorch model definitions
@@ -38,5 +50,6 @@ make serve-api
 - `src/smartgrid/evaluation`: metrics + reporting/export
 - `src/smartgrid/registry`: publication of validated models
 - `src/smartgrid/api`: inference API
+- `src/Legacy`: legacy local experimentation kept for dev-only workflows
 - `configs/consumption`: experiment configs
 - `scripts/`: thin wrappers for local execution
