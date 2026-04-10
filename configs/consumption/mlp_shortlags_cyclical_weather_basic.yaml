@@ -1,0 +1,48 @@
+
+
+experiment_name: consumption_mlp_weather_basic
+problem: consumption
+
+data:
+  historical_csv: "data/processed/conso/2025-12-02_10_15_previsions_data_conso_historiques_clean.csv"
+  holidays_xlsx: "data/processed/Holidays.xlsx"
+  weather_csv: "data/processed/Weather data 2020-2026.csv"
+  benchmark_csv: "data/processed/conso/2025-12-02_10_15_previsions_data_conso_prev_ptot_clean.csv"
+  date_col: Date
+  target_name: tot
+
+split:
+  train_ratio: 0.70
+  val_ratio: 0.15
+  train_end_date: null
+  val_end_date: null
+
+features:
+  include_calendar: true
+  include_temperature: true
+  include_manual_daily_lags: true
+  include_cyclical_time: true
+  include_lag_aggregates: false
+  include_recent_dynamics: false
+  include_weather: true
+  weather_mode: basic
+  lag_days: [1, 2, 3]
+
+training:
+  seed: 42
+  batch_size: 720
+  epochs: 100
+  patience: 8
+  learning_rate: 0.001
+  weight_decay: 0.0
+  dropout: 0.0
+  hidden_layers: [1024, 512]
+  device: auto
+  num_workers: 0
+
+artifacts:
+  root_dir: artifacts
+  exports_subdir: exports/consumption
+  registry_subdir: models/consumption
+  notebook_output_filename: notebook_export_consumption.csv
+  summary_filename: run_summary.json

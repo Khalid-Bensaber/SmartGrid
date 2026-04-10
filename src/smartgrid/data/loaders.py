@@ -12,6 +12,28 @@ from smartgrid.common.constants import (
     TOTAL_COLUMNS,
 )
 
+WEATHER_RAW_COLUMNS = [
+    "AirTemp",
+    "CloudOpacity",
+    "Dni10",
+    "Dni90",
+    "DniMoy",
+    "Ghi10",
+    "Ghi90",
+    "GhiMoy",
+]
+
+WEATHER_RENAME_MAP = {
+    "AirTemp": "Weather_AirTemp",
+    "CloudOpacity": "Weather_CloudOpacity",
+    "Dni10": "Weather_Dni10",
+    "Dni90": "Weather_Dni90",
+    "DniMoy": "Weather_DniMoy",
+    "Ghi10": "Weather_Ghi10",
+    "Ghi90": "Weather_Ghi90",
+    "GhiMoy": "Weather_GhiMoy",
+}
+
 
 def load_holiday_sets(holidays_xlsx: str | Path) -> tuple[set, set]:
     xls = pd.ExcelFile(holidays_xlsx)
@@ -48,6 +70,45 @@ def load_history(csv_path: str | Path, date_col: str = "Date") -> pd.DataFrame:
             df["Airtemp"] = DEFAULT_AIRTEMP_VALUE
 
     return df
+
+
+def load_weather_history(weather_csv: str | Path | None, date_col: str = "Date") -> pd.DataFrame | None:
+    if weather_csv is None:
+        return None
+
+    path = Path(weather_csv)
+    if not path.exists():
+        warnings.warn(f"Weather CSV not found: {weather_csv}")
+        return None
+
+    weather = pd.read_csv(path)
+    weather[date_col] = pd.to_datetime(weather[date_col], errors="coerce")
+    weather = weather.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
+
+    keep_cols = [date_col] + [c for c in WEATHER_RAW_COLUMNS if c in weather.columns]
+    missing = [c for c in WEATHER_RAW_COLUMNS if c not in weather.columns]
+    if missing:
+        warnings.warn(f"Weather CSV missing optional columns: {missing}")
+
+    weather = weather[keep_cols].copy()
+    weather = weather.rename(columns=WEATHER_RENAME_MAP)
+    weather = weather.drop_duplicates(subset=[date_col], keep="last").reset_index(drop=True)
+    return weather
+
+
+def merge_weather_on_history(hist: pd.DataFrame, weather: pd.DataFrame | None, date_col: str = "Date") -> pd.DataFrame:
+    if weather is None:
+        return hist
+
+    merged = hist.merge(weather, on=date_col, how="left")
+    weather_cols = [c for c in merged.columns if c.startswith("Weather_")]
+
+    if weather_cols:
+        merged = merged.sort_values(date_col).reset_index(drop=True)
+        merged[weather_cols] = merged[weather_cols].interpolate(method="linear", limit_direction="both")
+        merged[weather_cols] = merged[weather_cols].ffill().bfill()
+
+    return merged
 
 
 def load_old_benchmark(benchmark_csv: str | Path | None, date_col: str = "Date") -> pd.DataFrame | None:

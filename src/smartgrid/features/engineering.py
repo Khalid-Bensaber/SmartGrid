@@ -6,6 +6,31 @@ import pandas as pd
 
 from smartgrid.common.constants import DEFAULT_TARGET_NAME, N_STEPS_PER_DAY
 
+DEFAULT_WEATHER_COLUMNS = [
+    "Weather_AirTemp",
+    "Weather_CloudOpacity",
+    "Weather_Dni10",
+    "Weather_Dni90",
+    "Weather_DniMoy",
+    "Weather_Ghi10",
+    "Weather_Ghi90",
+    "Weather_GhiMoy",
+]
+
+BASIC_WEATHER_COLUMNS = [
+    "Weather_AirTemp",
+    "Weather_CloudOpacity",
+]
+
+IRRADIANCE_WEATHER_COLUMNS = [
+    "Weather_Dni10",
+    "Weather_Dni90",
+    "Weather_DniMoy",
+    "Weather_Ghi10",
+    "Weather_Ghi90",
+    "Weather_GhiMoy",
+]
+
 
 def add_calendar_features(df: pd.DataFrame, holiday_dates: set, special_dates: set, date_col: str) -> pd.DataFrame:
     out = df.copy()
@@ -16,7 +41,7 @@ def add_calendar_features(df: pd.DataFrame, holiday_dates: set, special_dates: s
     out["weekday"] = dt.dt.weekday
     out["is_weekend"] = (out["weekday"] >= 5).astype(int)
     out["month"] = dt.dt.month
-    out["date_only"] = dt.dt.date
+    out["date_only"] = out[date_col].dt.date
     out["is_holiday"] = out["date_only"].isin(holiday_dates).astype(int)
     out["is_special_day"] = out["date_only"].isin(special_dates).astype(int)
     out.loc[out["is_special_day"] == 1, "is_holiday"] = 0
@@ -51,6 +76,30 @@ def add_lag_aggregate_features(df: pd.DataFrame, lag_days: list[int] | tuple[int
     return out
 
 
+def add_recent_dynamics_features(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    out = df.copy()
+    out["lag_t1"] = out[target_col].shift(1)
+    out["lag_t2"] = out[target_col].shift(2)
+    out["lag_t3"] = out[target_col].shift(3)
+    out["delta_t1"] = out[target_col].shift(1) - out[target_col].shift(2)
+    out["delta_t2"] = out[target_col].shift(2) - out[target_col].shift(3)
+    out["rolling_mean_6"] = out[target_col].shift(1).rolling(6).mean()
+    out["rolling_std_6"] = out[target_col].shift(1).rolling(6).std()
+    return out
+
+
+def resolve_weather_columns(weather_mode: str | None, weather_columns: list[str] | None) -> list[str]:
+    if weather_columns:
+        return weather_columns
+    if weather_mode == "basic":
+        return BASIC_WEATHER_COLUMNS.copy()
+    if weather_mode == "irradiance":
+        return IRRADIANCE_WEATHER_COLUMNS.copy()
+    if weather_mode == "all":
+        return DEFAULT_WEATHER_COLUMNS.copy()
+    return []
+
+
 def build_feature_table(
     hist_df: pd.DataFrame,
     holiday_dates: set,
@@ -63,6 +112,10 @@ def build_feature_table(
     include_manual_daily_lags: bool = True,
     include_cyclical_time: bool = False,
     include_lag_aggregates: bool = False,
+    include_recent_dynamics: bool = False,
+    include_weather: bool = False,
+    weather_mode: str | None = None,
+    weather_columns: list[str] | None = None,
 ):
     df = hist_df.copy()
     feature_cols: list[str] = []
@@ -90,15 +143,34 @@ def build_feature_table(
             "day_of_year_cos",
         ])
 
-    if include_temperature:
+    if include_temperature and "Airtemp" in df.columns:
         feature_cols.append("Airtemp")
 
     if include_manual_daily_lags:
         df = add_manual_lag_features(df, target_col, lag_days)
         feature_cols.extend([f"lag_d{lag_day}" for lag_day in lag_days])
+
         if include_lag_aggregates:
             df = add_lag_aggregate_features(df, lag_days)
             feature_cols.extend(["lag_mean", "lag_std", "lag_min", "lag_max"])
+
+    if include_recent_dynamics:
+        df = add_recent_dynamics_features(df, target_col)
+        feature_cols.extend([
+            "lag_t1",
+            "lag_t2",
+            "lag_t3",
+            "delta_t1",
+            "delta_t2",
+            "rolling_mean_6",
+            "rolling_std_6",
+        ])
+
+    if include_weather:
+        selected_weather_cols = resolve_weather_columns(weather_mode, weather_columns)
+        for col in selected_weather_cols:
+            if col in df.columns:
+                feature_cols.append(col)
 
     feature_cols = list(dict.fromkeys(feature_cols))
     df = df.dropna(subset=feature_cols + [target_col]).reset_index(drop=True)

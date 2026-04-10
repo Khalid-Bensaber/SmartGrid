@@ -11,7 +11,13 @@ from sklearn.preprocessing import MinMaxScaler
 from smartgrid.common.constants import DEFAULT_TARGET_NAME
 from smartgrid.common.paths import build_consumption_paths
 from smartgrid.common.utils import get_device, load_yaml, parse_hidden_layers, utc_run_id
-from smartgrid.data.loaders import load_history, load_holiday_sets, load_old_benchmark
+from smartgrid.data.loaders import (
+    load_history,
+    load_holiday_sets,
+    load_old_benchmark,
+    load_weather_history,
+    merge_weather_on_history,
+)
 from smartgrid.data.splits import make_splits
 from smartgrid.evaluation.metrics import compute_basic_metrics
 from smartgrid.evaluation.reporting import (
@@ -60,6 +66,9 @@ def main() -> None:
 
     holiday_dates, special_dates = load_holiday_sets(data_cfg["holidays_xlsx"])
     hist = load_history(data_cfg["historical_csv"], date_col=data_cfg["date_col"])
+    weather = load_weather_history(data_cfg.get("weather_csv"), date_col=data_cfg["date_col"])
+    hist = merge_weather_on_history(hist, weather, date_col=data_cfg["date_col"])
+
     feat_df, feature_cols = build_feature_table(
         hist_df=hist,
         holiday_dates=holiday_dates,
@@ -72,8 +81,12 @@ def main() -> None:
         include_manual_daily_lags=feat_cfg.get("include_manual_daily_lags", True),
         include_cyclical_time=feat_cfg.get("include_cyclical_time", False),
         include_lag_aggregates=feat_cfg.get("include_lag_aggregates", False),
+        include_recent_dynamics=feat_cfg.get("include_recent_dynamics", False),
+        include_weather=feat_cfg.get("include_weather", False),
+        weather_mode=feat_cfg.get("weather_mode"),
+        weather_columns=feat_cfg.get("weather_columns"),
     )
-
+    
     train_df, val_df, test_df = make_splits(
         feat_df,
         date_col=data_cfg["date_col"],
@@ -170,6 +183,7 @@ def main() -> None:
         "analysis_days": args.analysis_days,
         "config_path": str(Path(args.config).resolve()),
         "history": train_result.history,
+        "weather_csv": data_cfg.get("weather_csv"),
     }
 
     train_result.model_config["feature_columns"] = feature_cols
