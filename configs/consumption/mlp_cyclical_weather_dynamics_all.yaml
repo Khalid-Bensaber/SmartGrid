@@ -1,3 +1,5 @@
+
+
 experiment_name: consumption_mlp_weather_basic
 problem: consumption
 
@@ -19,9 +21,9 @@ features:
   include_calendar: true
   include_temperature: true
   include_manual_daily_lags: true
-  include_cyclical_time: false
-  include_lag_aggregates: false
-  include_recent_dynamics: false
+  include_cyclical_time: true
+  include_lag_aggregates: true
+  include_recent_dynamics: true
   include_weather: true
   weather_mode: basic
   lag_days: [7, 1, 2, 3, 4, 5, 6]
