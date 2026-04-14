@@ -46,12 +46,25 @@ def main() -> None:
         ]
         print(f"[RUN] {' '.join(cmd)}")
         completed = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        if completed.stderr.strip():
+            print(completed.stderr)
         print(completed.stdout)
         payload = extract_last_json(completed.stdout)
         row = {
             "config": config_path,
             "run_id": payload["run_id"],
+            "experiment_name": payload.get("experiment_name"),
             "selected_analysis_day": payload["selected_analysis_day"],
+            "train_duration_sec": payload.get("train_duration_sec"),
+            "n_features": payload.get("n_features"),
+            "epochs_ran": payload.get("epochs_ran"),
+            "best_val_loss": payload.get("best_val_loss"),
+            "final_train_loss": payload.get("final_train_loss"),
+            "final_val_loss": payload.get("final_val_loss"),
+            "n_train_rows": payload.get("n_train_rows"),
+            "n_val_rows": payload.get("n_val_rows"),
+            "n_test_rows": payload.get("n_test_rows"),
+            "feature_config_json": json.dumps(payload.get("feature_config"), sort_keys=True),
             **payload["metrics_model"],
         }
         rows.append(row)

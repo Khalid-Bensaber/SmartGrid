@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import time
 from dataclasses import dataclass
 
@@ -66,6 +67,7 @@ def train_mlp_regressor(
     num_workers: int,
     device: torch.device,
     resume_checkpoint: str | None = None,
+    logger: logging.Logger | None = None,
 ) -> TrainResult:
     set_seed(seed)
 
@@ -153,14 +155,22 @@ def train_mlp_regressor(
         elapsed = time.time() - global_start
         epoch_duration = time.time() - epoch_start
         remaining = max(epochs - epoch, 0) * epoch_duration
-        print(
-            f"[EPOCH {epoch:03d}/{epochs}] train_loss={train_loss:.6f} "
-            f"val_loss={val_loss:.6f} train_mae={train_mae:.6f} val_mae={val_mae:.6f} "
-            f"elapsed={elapsed/60:.2f}m eta={remaining/60:.2f}m"
-        )
+        if logger is not None:
+            logger.info(
+                "[epoch %03d/%03d] train_loss=%.6f val_loss=%.6f train_mae=%.6f val_mae=%.6f elapsed=%.2fm eta=%.2fm",
+                epoch,
+                epochs,
+                train_loss,
+                val_loss,
+                train_mae,
+                val_mae,
+                elapsed / 60.0,
+                remaining / 60.0,
+            )
 
         if epochs_without_improvement >= patience:
-            print(f"[INFO] early stopping triggered after {epoch} epochs")
+            if logger is not None:
+                logger.info("Early stopping triggered after %s epochs", epoch)
             break
 
     model.load_state_dict(best_state)

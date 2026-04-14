@@ -29,10 +29,10 @@ def consumption_model_info():
     if not REGISTRY_CURRENT_DIR.exists() or not (REGISTRY_CURRENT_DIR / "model.pt").exists():
         raise HTTPException(status_code=404, detail="No promoted consumption model found")
     device = get_device("auto")
-    _, _, _, model_config, summary = load_current_consumption_bundle(REGISTRY_CURRENT_DIR, device)
+    bundle = load_current_consumption_bundle(REGISTRY_CURRENT_DIR, device)
     return {
-        "model_config": model_config,
-        "latest_summary": summary,
+        "model_config": bundle.model_config,
+        "latest_summary": bundle.summary,
     }
 
 
@@ -42,8 +42,8 @@ def predict_consumption_from_features(payload: ConsumptionPredictRequest):
         raise HTTPException(status_code=404, detail="No promoted consumption model found")
 
     device = get_device("auto")
-    model, x_scaler, y_scaler, model_config, summary = load_current_consumption_bundle(REGISTRY_CURRENT_DIR, device)
-    feature_columns = summary["feature_columns"] if summary else model_config.get("feature_columns")
+    bundle = load_current_consumption_bundle(REGISTRY_CURRENT_DIR, device)
+    feature_columns = bundle.summary["feature_columns"] if bundle.summary else bundle.model_config.get("feature_columns")
     if feature_columns is None:
         raise HTTPException(status_code=500, detail="Feature columns missing from summary/model config")
 
@@ -51,9 +51,16 @@ def predict_consumption_from_features(payload: ConsumptionPredictRequest):
     if missing:
         raise HTTPException(status_code=400, detail={"missing_feature_columns": missing})
 
-    prediction = predict_from_feature_dict(model, x_scaler, y_scaler, payload.features, feature_columns, device)
+    prediction = predict_from_feature_dict(
+        bundle.model,
+        bundle.x_scaler,
+        bundle.y_scaler,
+        payload.features,
+        feature_columns,
+        device,
+    )
     return ConsumptionPredictResponse(
         prediction=prediction,
-        model_type=model_config.get("model_type", "unknown"),
+        model_type=bundle.model_config.get("model_type", "unknown"),
         feature_columns=feature_columns,
     )

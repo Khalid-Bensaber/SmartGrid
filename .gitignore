@@ -74,3 +74,6 @@ pip-wheel-metadata/
 *.err
 *.pid
 *.tmp
+
+
+Skills/

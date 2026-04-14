@@ -39,6 +39,7 @@ def pick_analysis_day(backtest: pd.DataFrame, benchmark: pd.DataFrame | None, da
 
 
 def make_notebook_export_legacy_schema(df_day: pd.DataFrame, date_col: str) -> pd.DataFrame:
+    """Compatibility export for legacy notebooks expecting the old forecast schema."""
     export = pd.DataFrame(
         {
             "name": "CONSO_Prevision_Data",
@@ -58,6 +59,7 @@ def make_total_export(
     date_col: str,
     target_col: str = DEFAULT_TARGET_NAME,
 ) -> pd.DataFrame:
+    """Compact analysis export for one selected day, distinct from full backtest outputs."""
     cols = [date_col, target_col, "Ptot_TOTAL_Forecast"]
     if "OldLegacy_TOTAL_Forecast" in df_day.columns:
         cols.append("OldLegacy_TOTAL_Forecast")
@@ -79,6 +81,7 @@ def build_backtest_outputs(
     benchmark: pd.DataFrame | None,
     target_col: str = DEFAULT_TARGET_NAME,
 ) -> pd.DataFrame:
+    """Build the full test-period backtest output used for evaluation and notebooks."""
     cols = [date_col, target_col]
     if "lag_d1" in test_df.columns:
         cols.append("lag_d1")
@@ -174,3 +177,27 @@ def evaluate_backtest(
         "comparison": comparison,
         "old_overlap_count": old_overlap_count,
     }
+
+
+def evaluate_forecast_frame(
+    forecast_df: pd.DataFrame,
+    date_col: str = "Date",
+    real_col: str = "Ptot_TOTAL_Real",
+    forecast_col: str = "Ptot_TOTAL_Forecast",
+) -> dict | None:
+    """Evaluate forecast outputs when truth is available, e.g. during historical replay."""
+    if real_col not in forecast_df.columns or forecast_col not in forecast_df.columns:
+        return None
+
+    valid = forecast_df.dropna(subset=[real_col, forecast_col]).copy()
+    if valid.empty:
+        return None
+
+    evaluated = build_metrics_df(
+        merged=valid[[date_col, real_col, forecast_col]].set_index(date_col),
+        real_col=real_col,
+        fc_col=forecast_col,
+        tol_abs=TOL_ABS,
+        tol_rel=TOL_REL,
+    )
+    return compute_metrics_v2(evaluated)

@@ -28,6 +28,8 @@ dependencies = [
 [project.scripts]
 smartgrid-train-consumption = "smartgrid.cli.train_consumption:main"
 smartgrid-promote-consumption = "smartgrid.cli.promote_consumption:main"
+smartgrid-predict-next-day = "smartgrid.cli.predict_next_day:main"
+smartgrid-replay-period = "smartgrid.cli.replay_period:main"
 
 [build-system]
 requires = ["hatchling"]
