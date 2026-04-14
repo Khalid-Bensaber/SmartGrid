@@ -4,32 +4,13 @@ import math
 
 import pandas as pd
 
-from smartgrid.common.constants import DEFAULT_TARGET_NAME, N_STEPS_PER_DAY
-
-DEFAULT_WEATHER_COLUMNS = [
-    "Weather_AirTemp",
-    "Weather_CloudOpacity",
-    "Weather_Dni10",
-    "Weather_Dni90",
-    "Weather_DniMoy",
-    "Weather_Ghi10",
-    "Weather_Ghi90",
-    "Weather_GhiMoy",
-]
-
-BASIC_WEATHER_COLUMNS = [
-    "Weather_AirTemp",
-    "Weather_CloudOpacity",
-]
-
-IRRADIANCE_WEATHER_COLUMNS = [
-    "Weather_Dni10",
-    "Weather_Dni90",
-    "Weather_DniMoy",
-    "Weather_Ghi10",
-    "Weather_Ghi90",
-    "Weather_GhiMoy",
-]
+from smartgrid.common.constants import (
+    BASIC_WEATHER_COLUMNS,
+    DEFAULT_TARGET_NAME,
+    DEFAULT_WEATHER_COLUMNS,
+    IRRADIANCE_WEATHER_COLUMNS,
+    N_STEPS_PER_DAY,
+)
 
 
 def add_calendar_features(df: pd.DataFrame, holiday_dates: set, special_dates: set, date_col: str) -> pd.DataFrame:

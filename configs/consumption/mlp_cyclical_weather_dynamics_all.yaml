@@ -1,6 +1,6 @@
 
 
-experiment_name: consumption_mlp_weather_basic
+experiment_name: consumption_mlp_cyclical_weather_dynamics_all
 problem: consumption
 
 data:
@@ -25,7 +25,7 @@ features:
   include_lag_aggregates: true
   include_recent_dynamics: true
   include_weather: true
-  weather_mode: basic
+  weather_mode: all
   lag_days: [7, 1, 2, 3, 4, 5, 6]
 
 training:

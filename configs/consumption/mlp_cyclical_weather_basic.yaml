@@ -1,5 +1,5 @@
 
-experiment_name: consumption_mlp_weather_basic
+experiment_name: consumption_mlp_cyclical_weather_basic
 problem: consumption
 
 data:

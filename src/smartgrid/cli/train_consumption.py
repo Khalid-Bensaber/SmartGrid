@@ -52,6 +52,7 @@ def main() -> None:
     feat_cfg = config["features"]
     train_cfg = config["training"]
     artifacts_cfg = config["artifacts"]
+    target_col = data_cfg.get("target_name", DEFAULT_TARGET_NAME)
 
     run_id = utc_run_id("consumption_mlp")
     paths = build_consumption_paths(
@@ -65,7 +66,11 @@ def main() -> None:
     hidden_layers = parse_hidden_layers(train_cfg["hidden_layers"])
 
     holiday_dates, special_dates = load_holiday_sets(data_cfg["holidays_xlsx"])
-    hist = load_history(data_cfg["historical_csv"], date_col=data_cfg["date_col"])
+    hist = load_history(
+        data_cfg["historical_csv"],
+        date_col=data_cfg["date_col"],
+        target_col=target_col,
+    )
     weather = load_weather_history(data_cfg.get("weather_csv"), date_col=data_cfg["date_col"])
     hist = merge_weather_on_history(hist, weather, date_col=data_cfg["date_col"])
 
@@ -74,7 +79,7 @@ def main() -> None:
         holiday_dates=holiday_dates,
         special_dates=special_dates,
         date_col=data_cfg["date_col"],
-        target_col=data_cfg.get("target_name", DEFAULT_TARGET_NAME),
+        target_col=target_col,
         lag_days=feat_cfg.get("lag_days", [7, 1, 2, 3, 4, 5, 6]),
         include_calendar=feat_cfg.get("include_calendar", True),
         include_temperature=feat_cfg.get("include_temperature", True),
@@ -97,11 +102,11 @@ def main() -> None:
     )
 
     X_train = train_df[feature_cols].to_numpy(dtype=float)
-    y_train = train_df[[DEFAULT_TARGET_NAME]].to_numpy(dtype=float)
+    y_train = train_df[[target_col]].to_numpy(dtype=float)
     X_val = val_df[feature_cols].to_numpy(dtype=float)
-    y_val = val_df[[DEFAULT_TARGET_NAME]].to_numpy(dtype=float)
+    y_val = val_df[[target_col]].to_numpy(dtype=float)
     X_test = test_df[feature_cols].to_numpy(dtype=float)
-    y_test = test_df[DEFAULT_TARGET_NAME].to_numpy(dtype=float)
+    y_test = test_df[target_col].to_numpy(dtype=float)
 
     x_scaler = MinMaxScaler()
     y_scaler = MinMaxScaler()
@@ -136,8 +141,18 @@ def main() -> None:
     basic_metrics = compute_basic_metrics(y_test, predictions)
 
     benchmark = load_old_benchmark(data_cfg.get("benchmark_csv"), date_col=data_cfg["date_col"])
-    backtest = build_backtest_outputs(test_df=test_df, date_col=data_cfg["date_col"], predictions=predictions, benchmark=benchmark)
-    evaluation = evaluate_backtest(backtest=backtest, date_col=data_cfg["date_col"])
+    backtest = build_backtest_outputs(
+        test_df=test_df,
+        date_col=data_cfg["date_col"],
+        predictions=predictions,
+        benchmark=benchmark,
+        target_col=target_col,
+    )
+    evaluation = evaluate_backtest(
+        backtest=backtest,
+        date_col=data_cfg["date_col"],
+        target_col=target_col,
+    )
 
     analysis_day = pick_analysis_day(backtest, benchmark, data_cfg["date_col"], args.analysis_date)
     start_day = np.datetime64(analysis_day)
@@ -149,7 +164,7 @@ def main() -> None:
     notebook_export_path = paths.exports_dir / artifacts_cfg["notebook_output_filename"]
     notebook_export.to_csv(notebook_export_path, index=False)
 
-    total_export = make_total_export(day_df, data_cfg["date_col"])
+    total_export = make_total_export(day_df, data_cfg["date_col"], target_col=target_col)
     total_export_path = paths.exports_dir / "total_forecast_consumption.csv"
     total_export.to_csv(total_export_path, index=False)
 
@@ -161,8 +176,10 @@ def main() -> None:
     summary = {
         "run_id": run_id,
         "problem": "consumption",
+        "experiment_name": config.get("experiment_name"),
         "backend": "pytorch",
         "device": str(device),
+        "target_column": target_col,
         "feature_columns": feature_cols,
         "feature_config": feat_cfg,
         "hidden_layers": list(hidden_layers),

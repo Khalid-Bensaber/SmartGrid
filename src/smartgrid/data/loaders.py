@@ -10,29 +10,9 @@ from smartgrid.common.constants import (
     DEFAULT_TARGET_NAME,
     OLD_FORECAST_COLUMNS,
     TOTAL_COLUMNS,
+    WEATHER_RAW_COLUMNS,
+    WEATHER_RENAME_MAP,
 )
-
-WEATHER_RAW_COLUMNS = [
-    "AirTemp",
-    "CloudOpacity",
-    "Dni10",
-    "Dni90",
-    "DniMoy",
-    "Ghi10",
-    "Ghi90",
-    "GhiMoy",
-]
-
-WEATHER_RENAME_MAP = {
-    "AirTemp": "Weather_AirTemp",
-    "CloudOpacity": "Weather_CloudOpacity",
-    "Dni10": "Weather_Dni10",
-    "Dni90": "Weather_Dni90",
-    "DniMoy": "Weather_DniMoy",
-    "Ghi10": "Weather_Ghi10",
-    "Ghi90": "Weather_Ghi90",
-    "GhiMoy": "Weather_GhiMoy",
-}
 
 
 def load_holiday_sets(holidays_xlsx: str | Path) -> tuple[set, set]:
@@ -52,7 +32,11 @@ def load_holiday_sets(holidays_xlsx: str | Path) -> tuple[set, set]:
     return holiday_dates, special_dates
 
 
-def load_history(csv_path: str | Path, date_col: str = "Date") -> pd.DataFrame:
+def load_history(
+    csv_path: str | Path,
+    date_col: str = "Date",
+    target_col: str = DEFAULT_TARGET_NAME,
+) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     df = df.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
@@ -61,7 +45,10 @@ def load_history(csv_path: str | Path, date_col: str = "Date") -> pd.DataFrame:
     if missing_cols:
         raise ValueError(f"Missing required history columns: {missing_cols}")
 
-    df[DEFAULT_TARGET_NAME] = df[TOTAL_COLUMNS].sum(axis=1)
+    total_target = df[TOTAL_COLUMNS].sum(axis=1)
+    df[DEFAULT_TARGET_NAME] = total_target
+    if target_col != DEFAULT_TARGET_NAME:
+        df[target_col] = total_target
 
     if "Airtemp" not in df.columns:
         if "AirTemp" in df.columns:
