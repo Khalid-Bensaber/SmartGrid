@@ -50,8 +50,8 @@ def main() -> None:
     logger.info("Forecast request target_date=%s requested=%s", target_date, requested_target)
 
     forecast_df = forecast_target_day(runtime, target_date, logger=logger)
-    run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
-    output_paths = write_forecast_outputs(forecast_df, runtime.artifacts_root, target_date, run_id)
+    effective_run_id = str(forecast_df["model_run_id"].iloc[0]) if not forecast_df.empty else "unknown"
+    output_paths = write_forecast_outputs(forecast_df, runtime.artifacts_root, target_date, effective_run_id)
 
     custom_output = None
     if args.output_csv is not None:
@@ -70,7 +70,7 @@ def main() -> None:
             {
                 "target_date": target_date,
                 "points": int(len(forecast_df)),
-                "model_run_id": run_id,
+                "model_run_id": effective_run_id,
                 "current_output_csv": str(output_paths.current_output_path.resolve()),
                 "archive_output_csv": str(output_paths.archive_output_path.resolve()),
                 "custom_output_csv": str(custom_output.resolve()) if custom_output else None,
