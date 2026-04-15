@@ -2,15 +2,15 @@ experiment_name: consumption_mlp_baseline
 problem: consumption
 
 data:
-  dataset_key: clean_v1
+  dataset_key: full_2020_2026
   date_col: Date
   target_name: tot
 
 split:
   train_ratio: 0.70
   val_ratio: 0.15
-  train_end_date: null
-  val_end_date: null
+  train_end_date: '2025-09-30'
+  val_end_date: '2025-12-31'
 
 features:
   # Baseline historique: calendrier + temperature + lags journaliers manuels.
