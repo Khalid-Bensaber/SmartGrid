@@ -37,11 +37,33 @@ make install
 make install-core
 make install-dev
 make install-dev-legacy
+make doctor
 make lint
 make test
+make verify
 make train-consumption
 make serve-api
 ```
+
+## Fresh Setup On A New PC
+
+After cloning the repository, the minimal sequence is:
+
+```bash
+git checkout dev
+uv sync --all-groups
+make test
+make doctor
+```
+
+Important:
+- `uv` and Python `3.12` must be installed on the machine first.
+- the repository includes the code, configs, tests, notebooks, and lockfile
+- the repository does **not** include the real datasets under `data/processed/`
+- `make test` validates the codebase and packaging without requiring the private datasets
+- `make doctor` tells you exactly which local data files are still missing and exits non-zero until they are present
+
+So on a new PC, cloning from GitHub is enough to install the Python project and build the package, but not enough to train, replay, or run the full data-aware workflow until the dataset files are copied into `data/`.
 
 ## Data and protocol
 
@@ -290,6 +312,12 @@ Tests:
 
 ```bash
 uv run pytest
+```
+
+Environment and data readiness:
+
+```bash
+uv run python scripts/check_setup.py
 ```
 
 Quick package compilation:

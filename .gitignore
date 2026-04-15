@@ -44,7 +44,7 @@ Thumbs.db
 # Project data stays local by default
 data/raw/*
 data/interim/*
-data/processed/*
+
 data/external/*
 
 # Keep folder placeholders
@@ -55,7 +55,7 @@ data/external/*
 
 # Training outputs and experiment artifacts
 artifacts/
-models/
+
 logs/
 runs/
 mlruns/
