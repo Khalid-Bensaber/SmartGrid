@@ -49,6 +49,7 @@ class ForecastRuntime:
     artifacts_root: Path
     current_dir: Path
     benchmark_csv: Path | None
+    allow_fallback: bool
 
 
 def infer_target_date_from_history(hist_df: pd.DataFrame, date_col: str = "Date") -> str:
@@ -130,6 +131,7 @@ def build_forecast_runtime(
     holidays_xlsx: str | Path | None = None,
     device_request: str = "auto",
     benchmark_csv: str | Path | None = "artifacts/benchmarks/consumption_feature_variants.csv",
+    allow_fallback: bool = True,
     logger: logging.Logger | None = None,
 ) -> ForecastRuntime:
     device = get_device(device_request)
@@ -184,6 +186,7 @@ def build_forecast_runtime(
         artifacts_root=Path(artifacts_root),
         current_dir=Path(current_dir),
         benchmark_csv=Path(benchmark_csv) if benchmark_csv is not None else None,
+        allow_fallback=allow_fallback,
     )
 
 
@@ -252,6 +255,12 @@ def select_runtime_for_target_date(
     if not current_missing:
         return runtime
 
+    if not runtime.allow_fallback:
+        raise RuntimeError(
+            "Current model is incompatible with target date "
+            f"{target_date}. Missing features: {sorted(current_missing)}"
+        )
+
     if logger is not None:
         logger.warning(
             "Current promoted model run_id=%s is incompatible with target_date=%s missing_features=%s. Searching fallback model.",
@@ -284,6 +293,7 @@ def select_runtime_for_target_date(
             artifacts_root=runtime.artifacts_root,
             current_dir=runtime.current_dir,
             benchmark_csv=runtime.benchmark_csv,
+            allow_fallback=runtime.allow_fallback,
         )
         candidate_missing = collect_missing_features(candidate_runtime, target_date)
         if not candidate_missing:

@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--artifacts-root", default="artifacts")
     parser.add_argument("--output-csv", default=None)
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--disable-fallback", action="store_true")
     return parser.parse_args()
 
 
@@ -44,6 +45,7 @@ def main() -> None:
         weather_csv=args.weather_csv,
         holidays_xlsx=args.holidays_xlsx,
         device_request=args.device,
+        allow_fallback=not args.disable_fallback,
         logger=logger,
     )
     target_date = args.target_date or infer_target_date_from_history(runtime.historical_df, runtime.date_col)

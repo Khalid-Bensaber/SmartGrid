@@ -2,8 +2,11 @@ experiment_name: consumption_mlp_baseline
 problem: consumption
 
 data:
+  # Historique principal utilise pour construire les features et la cible.
   historical_csv: data/processed/conso/2025-12-02_10_15_previsions_data_conso_historiques_clean.csv
+  # Calendrier des jours feries / jours speciaux reintegre dans les features calendrier.
   holidays_xlsx: data/processed/Holidays.xlsx
+  # Jeu de comparaison utilise dans les notebooks / benchmarks hors entrainement pur.
   benchmark_csv: data/processed/conso/2025-12-02_10_15_previsions_data_conso_prev_ptot_clean.csv
   date_col: Date
   target_name: tot
@@ -15,11 +18,15 @@ split:
   val_end_date: null
 
 features:
+  # Baseline historique: calendrier + temperature + lags journaliers manuels.
   include_calendar: true
   include_temperature: true
   include_manual_daily_lags: true
+  # Pas de codage cyclique dans le baseline de reference.
   include_cyclical_time: false
+  # Pas d'agregats de lags supplementaires dans ce baseline.
   include_lag_aggregates: false
+  # J-7 capte la saison hebdo, J-1..J-6 couvrent l'inertie recente.
   lag_days: [7, 1, 2, 3, 4, 5, 6]
 
 training:
@@ -31,6 +38,7 @@ training:
   weight_decay: 0.0
   dropout: 0.0
   hidden_layers: [1024, 512, 512]
+  # `auto` choisit CUDA si disponible, sinon CPU.
   device: auto
   num_workers: 0
 
