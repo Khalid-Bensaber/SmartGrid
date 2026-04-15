@@ -12,6 +12,7 @@ from smartgrid.common.constants import DEFAULT_TARGET_NAME
 from smartgrid.common.logging import build_log_path, setup_logger
 from smartgrid.common.paths import build_consumption_paths
 from smartgrid.common.utils import get_device, load_yaml, parse_hidden_layers, utc_run_id
+from smartgrid.data.catalog import resolve_consumption_data_config
 from smartgrid.data.loaders import (
     load_history,
     load_holiday_sets,
@@ -40,6 +41,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analysis-date", default=None)
     parser.add_argument("--analysis-days", type=int, default=1)
     parser.add_argument("--resume-checkpoint", default=None)
+    parser.add_argument("--dataset-key", default=None)
+    parser.add_argument("--catalog-path", default=None)
+    parser.add_argument("--historical-csv", default=None)
+    parser.add_argument("--benchmark-csv", default=None)
+    parser.add_argument("--weather-csv", default=None)
+    parser.add_argument("--holidays-xlsx", default=None)
     parser.add_argument("--promote", action="store_true")
     return parser.parse_args()
 
@@ -48,7 +55,17 @@ def main() -> None:
     args = parse_args()
     config = load_yaml(args.config)
 
-    data_cfg = config["data"]
+    data_cfg = resolve_consumption_data_config(
+        config["data"],
+        dataset_key=args.dataset_key,
+        catalog_path=args.catalog_path,
+        overrides={
+            "historical_csv": args.historical_csv,
+            "benchmark_csv": args.benchmark_csv,
+            "weather_csv": args.weather_csv,
+            "holidays_xlsx": args.holidays_xlsx,
+        },
+    )
     split_cfg = config["split"]
     feat_cfg = config["features"]
     train_cfg = config["training"]
@@ -202,6 +219,10 @@ def main() -> None:
         "experiment_name": config.get("experiment_name"),
         "backend": "pytorch",
         "device": str(device),
+        "dataset_key": data_cfg.get("dataset_key"),
+        "dataset_description": data_cfg.get("dataset_description"),
+        "catalog_path": data_cfg.get("catalog_path"),
+        "aliases": data_cfg.get("aliases") or {},
         "date_col": data_cfg["date_col"],
         "historical_csv": str(Path(data_cfg["historical_csv"]).resolve()),
         "holidays_xlsx": str(Path(data_cfg["holidays_xlsx"]).resolve()),
