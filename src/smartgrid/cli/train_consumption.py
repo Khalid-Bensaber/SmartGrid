@@ -9,8 +9,10 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 
 from smartgrid.common.constants import DEFAULT_TARGET_NAME
+from smartgrid.common.logging import build_log_path, setup_logger
 from smartgrid.common.paths import build_consumption_paths
 from smartgrid.common.utils import get_device, load_yaml, parse_hidden_layers, utc_run_id
+from smartgrid.data.catalog import resolve_consumption_data_config
 from smartgrid.data.loaders import (
     load_history,
     load_holiday_sets,
@@ -39,6 +41,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analysis-date", default=None)
     parser.add_argument("--analysis-days", type=int, default=1)
     parser.add_argument("--resume-checkpoint", default=None)
+    parser.add_argument("--dataset-key", default=None)
+    parser.add_argument("--catalog-path", default=None)
+    parser.add_argument("--historical-csv", default=None)
+    parser.add_argument("--benchmark-csv", default=None)
+    parser.add_argument("--weather-csv", default=None)
+    parser.add_argument("--holidays-xlsx", default=None)
     parser.add_argument("--promote", action="store_true")
     return parser.parse_args()
 
@@ -47,13 +55,28 @@ def main() -> None:
     args = parse_args()
     config = load_yaml(args.config)
 
-    data_cfg = config["data"]
+    data_cfg = resolve_consumption_data_config(
+        config["data"],
+        dataset_key=args.dataset_key,
+        catalog_path=args.catalog_path,
+        overrides={
+            "historical_csv": args.historical_csv,
+            "benchmark_csv": args.benchmark_csv,
+            "weather_csv": args.weather_csv,
+            "holidays_xlsx": args.holidays_xlsx,
+        },
+    )
     split_cfg = config["split"]
     feat_cfg = config["features"]
     train_cfg = config["training"]
     artifacts_cfg = config["artifacts"]
+    target_col = data_cfg.get("target_name", DEFAULT_TARGET_NAME)
 
     run_id = utc_run_id("consumption_mlp")
+    logger = setup_logger(
+        "smartgrid.train",
+        log_file=build_log_path(artifacts_cfg["root_dir"], "train", f"{run_id}.log"),
+    )
     paths = build_consumption_paths(
         root_dir=artifacts_cfg["root_dir"],
         exports_subdir=artifacts_cfg["exports_subdir"],
@@ -63,9 +86,14 @@ def main() -> None:
 
     device = get_device(train_cfg.get("device", "auto"))
     hidden_layers = parse_hidden_layers(train_cfg["hidden_layers"])
+    logger.info("Starting consumption training run_id=%s config=%s device=%s", run_id, args.config, device)
 
     holiday_dates, special_dates = load_holiday_sets(data_cfg["holidays_xlsx"])
-    hist = load_history(data_cfg["historical_csv"], date_col=data_cfg["date_col"])
+    hist = load_history(
+        data_cfg["historical_csv"],
+        date_col=data_cfg["date_col"],
+        target_col=target_col,
+    )
     weather = load_weather_history(data_cfg.get("weather_csv"), date_col=data_cfg["date_col"])
     hist = merge_weather_on_history(hist, weather, date_col=data_cfg["date_col"])
 
@@ -74,7 +102,7 @@ def main() -> None:
         holiday_dates=holiday_dates,
         special_dates=special_dates,
         date_col=data_cfg["date_col"],
-        target_col=data_cfg.get("target_name", DEFAULT_TARGET_NAME),
+        target_col=target_col,
         lag_days=feat_cfg.get("lag_days", [7, 1, 2, 3, 4, 5, 6]),
         include_calendar=feat_cfg.get("include_calendar", True),
         include_temperature=feat_cfg.get("include_temperature", True),
@@ -86,6 +114,12 @@ def main() -> None:
         weather_mode=feat_cfg.get("weather_mode"),
         weather_columns=feat_cfg.get("weather_columns"),
     )
+    logger.info(
+        "Prepared feature table rows=%s n_features=%s feature_columns=%s",
+        len(feat_df),
+        len(feature_cols),
+        feature_cols,
+    )
     
     train_df, val_df, test_df = make_splits(
         feat_df,
@@ -95,13 +129,19 @@ def main() -> None:
         train_end_date=split_cfg.get("train_end_date"),
         val_end_date=split_cfg.get("val_end_date"),
     )
+    logger.info(
+        "Split dataset train=%s val=%s test=%s",
+        len(train_df),
+        len(val_df),
+        len(test_df),
+    )
 
     X_train = train_df[feature_cols].to_numpy(dtype=float)
-    y_train = train_df[[DEFAULT_TARGET_NAME]].to_numpy(dtype=float)
+    y_train = train_df[[target_col]].to_numpy(dtype=float)
     X_val = val_df[feature_cols].to_numpy(dtype=float)
-    y_val = val_df[[DEFAULT_TARGET_NAME]].to_numpy(dtype=float)
+    y_val = val_df[[target_col]].to_numpy(dtype=float)
     X_test = test_df[feature_cols].to_numpy(dtype=float)
-    y_test = test_df[DEFAULT_TARGET_NAME].to_numpy(dtype=float)
+    y_test = test_df[target_col].to_numpy(dtype=float)
 
     x_scaler = MinMaxScaler()
     y_scaler = MinMaxScaler()
@@ -129,6 +169,7 @@ def main() -> None:
         num_workers=train_cfg["num_workers"],
         device=device,
         resume_checkpoint=args.resume_checkpoint,
+        logger=logger,
     )
     train_duration_sec = time.time() - train_start
 
@@ -136,8 +177,18 @@ def main() -> None:
     basic_metrics = compute_basic_metrics(y_test, predictions)
 
     benchmark = load_old_benchmark(data_cfg.get("benchmark_csv"), date_col=data_cfg["date_col"])
-    backtest = build_backtest_outputs(test_df=test_df, date_col=data_cfg["date_col"], predictions=predictions, benchmark=benchmark)
-    evaluation = evaluate_backtest(backtest=backtest, date_col=data_cfg["date_col"])
+    backtest = build_backtest_outputs(
+        test_df=test_df,
+        date_col=data_cfg["date_col"],
+        predictions=predictions,
+        benchmark=benchmark,
+        target_col=target_col,
+    )
+    evaluation = evaluate_backtest(
+        backtest=backtest,
+        date_col=data_cfg["date_col"],
+        target_col=target_col,
+    )
 
     analysis_day = pick_analysis_day(backtest, benchmark, data_cfg["date_col"], args.analysis_date)
     start_day = np.datetime64(analysis_day)
@@ -149,7 +200,7 @@ def main() -> None:
     notebook_export_path = paths.exports_dir / artifacts_cfg["notebook_output_filename"]
     notebook_export.to_csv(notebook_export_path, index=False)
 
-    total_export = make_total_export(day_df, data_cfg["date_col"])
+    total_export = make_total_export(day_df, data_cfg["date_col"], target_col=target_col)
     total_export_path = paths.exports_dir / "total_forecast_consumption.csv"
     total_export.to_csv(total_export_path, index=False)
 
@@ -157,16 +208,36 @@ def main() -> None:
     selected_day_path = paths.exports_dir / f"selected_day_{analysis_day}.csv"
     backtest.to_csv(backtest_path, index=False)
     day_df.to_csv(selected_day_path, index=False)
+    epochs_ran = len(train_result.history["train_loss"])
+    best_val_loss = float(min(train_result.history["val_loss"])) if train_result.history["val_loss"] else None
+    final_train_loss = float(train_result.history["train_loss"][-1]) if train_result.history["train_loss"] else None
+    final_val_loss = float(train_result.history["val_loss"][-1]) if train_result.history["val_loss"] else None
 
     summary = {
         "run_id": run_id,
         "problem": "consumption",
+        "experiment_name": config.get("experiment_name"),
         "backend": "pytorch",
         "device": str(device),
+        "dataset_key": data_cfg.get("dataset_key"),
+        "dataset_description": data_cfg.get("dataset_description"),
+        "catalog_path": data_cfg.get("catalog_path"),
+        "aliases": data_cfg.get("aliases") or {},
+        "date_col": data_cfg["date_col"],
+        "historical_csv": str(Path(data_cfg["historical_csv"]).resolve()),
+        "holidays_xlsx": str(Path(data_cfg["holidays_xlsx"]).resolve()),
+        "weather_csv": str(Path(data_cfg["weather_csv"]).resolve()) if data_cfg.get("weather_csv") else None,
+        "benchmark_csv": str(Path(data_cfg["benchmark_csv"]).resolve()) if data_cfg.get("benchmark_csv") else None,
+        "target_column": target_col,
         "feature_columns": feature_cols,
         "feature_config": feat_cfg,
         "hidden_layers": list(hidden_layers),
+        "n_features": int(len(feature_cols)),
         "train_duration_sec": train_duration_sec,
+        "epochs_ran": epochs_ran,
+        "best_val_loss": best_val_loss,
+        "final_train_loss": final_train_loss,
+        "final_val_loss": final_val_loss,
         "metrics_basic": basic_metrics,
         **evaluation,
         "n_total_rows": int(len(feat_df)),
@@ -183,7 +254,18 @@ def main() -> None:
         "analysis_days": args.analysis_days,
         "config_path": str(Path(args.config).resolve()),
         "history": train_result.history,
-        "weather_csv": data_cfg.get("weather_csv"),
+        "run_dir": str(paths.run_dir.resolve()),
+        "exports_dir": str(paths.exports_dir.resolve()),
+        "backtest_csv": str(backtest_path.resolve()),
+        "day_compare_csv": str(selected_day_path.resolve()),
+        "output_total_csv": str(total_export_path.resolve()),
+        "output_notebook_csv": str(notebook_export_path.resolve()),
+        "export_roles": {
+            "backtest_csv": "full test-period evaluation output",
+            "day_compare_csv": "selected analysis day extracted from the backtest",
+            "output_total_csv": "compact selected-day comparison export",
+            "output_notebook_csv": "legacy notebook compatibility export",
+        },
     }
 
     train_result.model_config["feature_columns"] = feature_cols
@@ -197,17 +279,39 @@ def main() -> None:
     )
 
     save_json(paths.exports_dir / artifacts_cfg["summary_filename"], summary)
+    logger.info(
+        "Wrote outputs run_dir=%s exports_dir=%s backtest_csv=%s selected_day_csv=%s",
+        paths.run_dir,
+        paths.exports_dir,
+        backtest_path,
+        selected_day_path,
+    )
     if args.promote:
         promote_bundle(paths.run_dir, paths.registry_current_dir)
+        logger.info("Promoted run to current registry: %s", paths.registry_current_dir)
 
-    print(json.dumps({
+    payload = {
         "run_id": run_id,
         "run_dir": str(paths.run_dir.resolve()),
         "exports_dir": str(paths.exports_dir.resolve()),
         "promoted": bool(args.promote),
+        "config": str(Path(args.config)),
+        "experiment_name": config.get("experiment_name"),
         "selected_analysis_day": str(analysis_day),
+        "train_duration_sec": train_duration_sec,
+        "n_features": int(len(feature_cols)),
+        "epochs_ran": epochs_ran,
+        "best_val_loss": best_val_loss,
+        "final_train_loss": final_train_loss,
+        "final_val_loss": final_val_loss,
+        "n_train_rows": int(len(train_df)),
+        "n_val_rows": int(len(val_df)),
+        "n_test_rows": int(len(test_df)),
+        "feature_config": feat_cfg,
         "metrics_model": evaluation["metrics_model"],
-    }, indent=2))
+    }
+    logger.info("Training run completed successfully run_id=%s", run_id)
+    print(json.dumps(payload, indent=2))
 
 
 if __name__ == "__main__":

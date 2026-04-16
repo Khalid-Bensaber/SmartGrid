@@ -1,0 +1,26 @@
+consumption:
+  default_dataset: clean_v1
+  datasets:
+    clean_v1:
+      description: Canonical cleaned dataset used by the training and replay pipeline.
+      historical_csv: data/processed/conso/2025-12-02_10_15_previsions_data_conso_historiques_clean.csv
+      benchmark_csv: data/processed/conso/2025-12-02_10_15_previsions_data_conso_prev_ptot_clean.csv
+      weather_csv: data/processed/Weather data 2020-2026.csv
+      holidays_xlsx: data/processed/Holidays.xlsx
+      aliases:
+        consumption_history_csv: data/processed/conso/Consumption data 2020-2026.csv
+        consumption_forecast_csv: data/processed/conso/Consumption forecast 2020-2026.csv
+        legacy_historical_csv: data/processed/conso/Historique 2020-2025.csv
+        legacy_prediction_csv: data/processed/conso/Prediction 2020-2025.csv
+    legacy_2020_2025:
+      description: Legacy pair used in older exploratory notebooks.
+      historical_csv: data/processed/conso/Historique 2020-2025.csv
+      forecast_csv: data/processed/conso/Prediction 2020-2025.csv
+      weather_csv: data/processed/Weather data 2020-2026.csv
+      holidays_xlsx: data/processed/Holidays.xlsx
+    full_2020_2026:
+      description: Consolidated 2020-2026 pair kept for compatibility analyses.
+      historical_csv: data/processed/conso/Consumption data 2020-2026.csv
+      forecast_csv: data/processed/conso/Consumption forecast 2020-2026.csv
+      weather_csv: data/processed/Weather data 2020-2026.csv
+      holidays_xlsx: data/processed/Holidays.xlsx

@@ -2,17 +2,15 @@ experiment_name: consumption_mlp_short_lags
 problem: consumption
 
 data:
-  historical_csv: data/processed/conso/2025-12-02_10_15_previsions_data_conso_historiques_clean.csv
-  holidays_xlsx: data/processed/Holidays.xlsx
-  benchmark_csv: data/processed/conso/2025-12-02_10_15_previsions_data_conso_prev_ptot_clean.csv
+  dataset_key: full_2020_2026
   date_col: Date
   target_name: tot
 
 split:
   train_ratio: 0.70
   val_ratio: 0.15
-  train_end_date: null
-  val_end_date: null
+  train_end_date: '2025-09-30'
+  val_end_date: '2025-12-31'
 
 features:
   include_calendar: true

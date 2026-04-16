@@ -41,13 +41,13 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Project data stays local by default
+# Raw / intermediate data stays local by default
 data/raw/*
 data/interim/*
-data/processed/*
 data/external/*
 
-# Keep folder placeholders
+# `data/processed/` is intentionally versioned for now so a fresh clone is workable.
+# Keep folder placeholders for ignored directories.
 !data/raw/.gitkeep
 !data/interim/.gitkeep
 !data/processed/.gitkeep
@@ -55,7 +55,6 @@ data/external/*
 
 # Training outputs and experiment artifacts
 artifacts/
-models/
 logs/
 runs/
 mlruns/
@@ -74,3 +73,6 @@ pip-wheel-metadata/
 *.err
 *.pid
 *.tmp
+
+
+Skills/

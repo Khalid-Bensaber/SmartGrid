@@ -6,8 +6,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from smartgrid.common.constants import DEFAULT_TARGET_NAME, FORECAST_SCHEMA_COLUMNS, TOL_ABS, TOL_REL
-from smartgrid.evaluation.metrics import build_metrics_df, compute_metrics_v2, seasonal_naive_weekly, compute_new_vs_old_comparison
+from smartgrid.common.constants import (
+    DEFAULT_TARGET_NAME,
+    FORECAST_SCHEMA_COLUMNS,
+    TOL_ABS,
+    TOL_REL,
+)
+from smartgrid.evaluation.metrics import (
+    build_metrics_df,
+    compute_metrics_v2,
+    compute_new_vs_old_comparison,
+    seasonal_naive_weekly,
+)
 
 
 def pick_analysis_day(backtest: pd.DataFrame, benchmark: pd.DataFrame | None, date_col: str, requested_day: str | None):
@@ -29,6 +39,7 @@ def pick_analysis_day(backtest: pd.DataFrame, benchmark: pd.DataFrame | None, da
 
 
 def make_notebook_export_legacy_schema(df_day: pd.DataFrame, date_col: str) -> pd.DataFrame:
+    """Compatibility export for legacy notebooks expecting the old forecast schema."""
     export = pd.DataFrame(
         {
             "name": "CONSO_Prevision_Data",
@@ -43,12 +54,17 @@ def make_notebook_export_legacy_schema(df_day: pd.DataFrame, date_col: str) -> p
     return export[FORECAST_SCHEMA_COLUMNS]
 
 
-def make_total_export(df_day: pd.DataFrame, date_col: str) -> pd.DataFrame:
-    cols = [date_col, DEFAULT_TARGET_NAME, "Ptot_TOTAL_Forecast"]
+def make_total_export(
+    df_day: pd.DataFrame,
+    date_col: str,
+    target_col: str = DEFAULT_TARGET_NAME,
+) -> pd.DataFrame:
+    """Compact analysis export for one selected day, distinct from full backtest outputs."""
+    cols = [date_col, target_col, "Ptot_TOTAL_Forecast"]
     if "OldLegacy_TOTAL_Forecast" in df_day.columns:
         cols.append("OldLegacy_TOTAL_Forecast")
     out = df_day[cols].copy()
-    out = out.rename(columns={DEFAULT_TARGET_NAME: "Ptot_TOTAL_Real"})
+    out = out.rename(columns={target_col: "Ptot_TOTAL_Real"})
     return out
 
 
@@ -58,8 +74,18 @@ def save_json(path: str | Path, payload: dict) -> Path:
     return output_path
 
 
-def build_backtest_outputs(test_df: pd.DataFrame, date_col: str, predictions: np.ndarray, benchmark: pd.DataFrame | None) -> pd.DataFrame:
-    backtest = test_df[[date_col, DEFAULT_TARGET_NAME, "lag_d1"]].copy()
+def build_backtest_outputs(
+    test_df: pd.DataFrame,
+    date_col: str,
+    predictions: np.ndarray,
+    benchmark: pd.DataFrame | None,
+    target_col: str = DEFAULT_TARGET_NAME,
+) -> pd.DataFrame:
+    """Build the full test-period backtest output used for evaluation and notebooks."""
+    cols = [date_col, target_col]
+    if "lag_d1" in test_df.columns:
+        cols.append("lag_d1")
+    backtest = test_df[cols].copy()
     backtest["Ptot_TOTAL_Forecast"] = predictions
     backtest["name"] = "CONSO_Prevision_Data"
     if benchmark is not None:
@@ -67,10 +93,14 @@ def build_backtest_outputs(test_df: pd.DataFrame, date_col: str, predictions: np
     return backtest
 
 
-def evaluate_backtest(backtest: pd.DataFrame, date_col: str) -> dict:
+def evaluate_backtest(
+    backtest: pd.DataFrame,
+    date_col: str,
+    target_col: str = DEFAULT_TARGET_NAME,
+) -> dict:
     model_eval = build_metrics_df(
-        merged=backtest[[date_col, DEFAULT_TARGET_NAME, "Ptot_TOTAL_Forecast"]].set_index(date_col),
-        real_col=DEFAULT_TARGET_NAME,
+        merged=backtest[[date_col, target_col, "Ptot_TOTAL_Forecast"]].set_index(date_col),
+        real_col=target_col,
         fc_col="Ptot_TOTAL_Forecast",
         tol_abs=TOL_ABS,
         tol_rel=TOL_REL,
@@ -87,11 +117,12 @@ def evaluate_backtest(backtest: pd.DataFrame, date_col: str) -> dict:
     ).set_index(date_col if date_col in naive_df.reset_index().columns else model_eval.index.name)
 
     idx_valid = naive_eval["Ptot_TOTAL_FC"].notna()
-    model_eval_aligned = model_eval.loc[idx_valid]
     naive_eval_aligned = naive_eval.loc[idx_valid]
 
-    metrics_model = compute_metrics_v2(model_eval_aligned)
-    metrics_naive_weekly = compute_metrics_v2(naive_eval_aligned)
+    metrics_model = compute_metrics_v2(model_eval)
+    metrics_naive_weekly = (
+        compute_metrics_v2(naive_eval_aligned) if len(naive_eval_aligned) > 0 else None
+    )
     metrics_old_legacy = None
     metrics_model_on_old_overlap = None
     comparison_new_vs_old = None
@@ -102,15 +133,15 @@ def evaluate_backtest(backtest: pd.DataFrame, date_col: str) -> dict:
         old_overlap_count = int(len(overlap))
         if len(overlap) > 0:
             old_eval = build_metrics_df(
-                merged=overlap[[date_col, DEFAULT_TARGET_NAME, "OldLegacy_TOTAL_Forecast"]].set_index(date_col),
-                real_col=DEFAULT_TARGET_NAME,
+                merged=overlap[[date_col, target_col, "OldLegacy_TOTAL_Forecast"]].set_index(date_col),
+                real_col=target_col,
                 fc_col="OldLegacy_TOTAL_Forecast",
                 tol_abs=TOL_ABS,
                 tol_rel=TOL_REL,
             )
             model_overlap_eval = build_metrics_df(
-                merged=overlap[[date_col, DEFAULT_TARGET_NAME, "Ptot_TOTAL_Forecast"]].set_index(date_col),
-                real_col=DEFAULT_TARGET_NAME,
+                merged=overlap[[date_col, target_col, "Ptot_TOTAL_Forecast"]].set_index(date_col),
+                real_col=target_col,
                 fc_col="Ptot_TOTAL_Forecast",
                 tol_abs=TOL_ABS,
                 tol_rel=TOL_REL,
@@ -121,13 +152,19 @@ def evaluate_backtest(backtest: pd.DataFrame, date_col: str) -> dict:
 
     comparison = {
         "MASE (MAE_model / MAE_naive_weekly)": (
-            metrics_model["MAE"] / metrics_naive_weekly["MAE"] if metrics_naive_weekly["MAE"] else None
+            metrics_model["MAE"] / metrics_naive_weekly["MAE"]
+            if metrics_naive_weekly and metrics_naive_weekly["MAE"]
+            else None
         ),
         "MAE_skill% vs naive_weekly": (
-            100.0 * (1.0 - metrics_model["MAE"] / metrics_naive_weekly["MAE"]) if metrics_naive_weekly["MAE"] else None
+            100.0 * (1.0 - metrics_model["MAE"] / metrics_naive_weekly["MAE"])
+            if metrics_naive_weekly and metrics_naive_weekly["MAE"]
+            else None
         ),
         "RMSE_skill% vs naive_weekly": (
-            100.0 * (1.0 - metrics_model["RMSE"] / metrics_naive_weekly["RMSE"]) if metrics_naive_weekly["RMSE"] else None
+            100.0 * (1.0 - metrics_model["RMSE"] / metrics_naive_weekly["RMSE"])
+            if metrics_naive_weekly and metrics_naive_weekly["RMSE"]
+            else None
         ),
     }
 
@@ -140,3 +177,27 @@ def evaluate_backtest(backtest: pd.DataFrame, date_col: str) -> dict:
         "comparison": comparison,
         "old_overlap_count": old_overlap_count,
     }
+
+
+def evaluate_forecast_frame(
+    forecast_df: pd.DataFrame,
+    date_col: str = "Date",
+    real_col: str = "Ptot_TOTAL_Real",
+    forecast_col: str = "Ptot_TOTAL_Forecast",
+) -> dict | None:
+    """Evaluate forecast outputs when truth is available, e.g. during historical replay."""
+    if real_col not in forecast_df.columns or forecast_col not in forecast_df.columns:
+        return None
+
+    valid = forecast_df.dropna(subset=[real_col, forecast_col]).copy()
+    if valid.empty:
+        return None
+
+    evaluated = build_metrics_df(
+        merged=valid[[date_col, real_col, forecast_col]].set_index(date_col),
+        real_col=real_col,
+        fc_col=forecast_col,
+        tol_abs=TOL_ABS,
+        tol_rel=TOL_REL,
+    )
+    return compute_metrics_v2(evaluated)

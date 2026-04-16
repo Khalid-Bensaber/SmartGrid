@@ -8,31 +8,13 @@ import pandas as pd
 from smartgrid.common.constants import (
     DEFAULT_AIRTEMP_VALUE,
     DEFAULT_TARGET_NAME,
+    FORECAST_FREQ,
+    N_STEPS_PER_DAY,
     OLD_FORECAST_COLUMNS,
     TOTAL_COLUMNS,
+    WEATHER_RAW_COLUMNS,
+    WEATHER_RENAME_MAP,
 )
-
-WEATHER_RAW_COLUMNS = [
-    "AirTemp",
-    "CloudOpacity",
-    "Dni10",
-    "Dni90",
-    "DniMoy",
-    "Ghi10",
-    "Ghi90",
-    "GhiMoy",
-]
-
-WEATHER_RENAME_MAP = {
-    "AirTemp": "Weather_AirTemp",
-    "CloudOpacity": "Weather_CloudOpacity",
-    "Dni10": "Weather_Dni10",
-    "Dni90": "Weather_Dni90",
-    "DniMoy": "Weather_DniMoy",
-    "Ghi10": "Weather_Ghi10",
-    "Ghi90": "Weather_Ghi90",
-    "GhiMoy": "Weather_GhiMoy",
-}
 
 
 def load_holiday_sets(holidays_xlsx: str | Path) -> tuple[set, set]:
@@ -52,7 +34,11 @@ def load_holiday_sets(holidays_xlsx: str | Path) -> tuple[set, set]:
     return holiday_dates, special_dates
 
 
-def load_history(csv_path: str | Path, date_col: str = "Date") -> pd.DataFrame:
+def load_history(
+    csv_path: str | Path,
+    date_col: str = "Date",
+    target_col: str = DEFAULT_TARGET_NAME,
+) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     df = df.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
@@ -61,7 +47,10 @@ def load_history(csv_path: str | Path, date_col: str = "Date") -> pd.DataFrame:
     if missing_cols:
         raise ValueError(f"Missing required history columns: {missing_cols}")
 
-    df[DEFAULT_TARGET_NAME] = df[TOTAL_COLUMNS].sum(axis=1)
+    total_target = df[TOTAL_COLUMNS].sum(axis=1)
+    df[DEFAULT_TARGET_NAME] = total_target
+    if target_col != DEFAULT_TARGET_NAME:
+        df[target_col] = total_target
 
     if "Airtemp" not in df.columns:
         if "AirTemp" in df.columns:
@@ -109,6 +98,43 @@ def merge_weather_on_history(hist: pd.DataFrame, weather: pd.DataFrame | None, d
         merged[weather_cols] = merged[weather_cols].ffill().bfill()
 
     return merged
+
+
+def slice_history_before_date(hist: pd.DataFrame, target_date: str, date_col: str = "Date") -> pd.DataFrame:
+    target_start = pd.Timestamp(target_date)
+    out = hist[hist[date_col] < target_start].copy()
+    out = out.sort_values(date_col).reset_index(drop=True)
+    return out
+
+
+def extract_truth_for_day(hist: pd.DataFrame, target_date: str, date_col: str = "Date") -> pd.DataFrame:
+    target_start = pd.Timestamp(target_date)
+    target_end = target_start + pd.Timedelta(days=1)
+    out = hist[(hist[date_col] >= target_start) & (hist[date_col] < target_end)].copy()
+    out = out.sort_values(date_col).reset_index(drop=True)
+    return out
+
+
+def build_target_day_frame(
+    target_date: str,
+    weather: pd.DataFrame | None = None,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    target_start = pd.Timestamp(target_date)
+    dates = pd.date_range(target_start, periods=N_STEPS_PER_DAY, freq=FORECAST_FREQ)
+    target_df = pd.DataFrame({date_col: dates})
+
+    if weather is not None:
+        weather_day = weather[weather[date_col].isin(dates)].copy()
+        weather_day = weather_day.drop_duplicates(subset=[date_col], keep="last")
+        target_df = target_df.merge(weather_day, on=date_col, how="left")
+
+    if "Weather_AirTemp" in target_df.columns:
+        target_df["Airtemp"] = target_df["Weather_AirTemp"]
+    elif "Airtemp" not in target_df.columns:
+        target_df["Airtemp"] = DEFAULT_AIRTEMP_VALUE
+
+    return target_df
 
 
 def load_old_benchmark(benchmark_csv: str | Path | None, date_col: str = "Date") -> pd.DataFrame | None:

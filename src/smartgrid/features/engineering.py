@@ -4,32 +4,13 @@ import math
 
 import pandas as pd
 
-from smartgrid.common.constants import DEFAULT_TARGET_NAME, N_STEPS_PER_DAY
-
-DEFAULT_WEATHER_COLUMNS = [
-    "Weather_AirTemp",
-    "Weather_CloudOpacity",
-    "Weather_Dni10",
-    "Weather_Dni90",
-    "Weather_DniMoy",
-    "Weather_Ghi10",
-    "Weather_Ghi90",
-    "Weather_GhiMoy",
-]
-
-BASIC_WEATHER_COLUMNS = [
-    "Weather_AirTemp",
-    "Weather_CloudOpacity",
-]
-
-IRRADIANCE_WEATHER_COLUMNS = [
-    "Weather_Dni10",
-    "Weather_Dni90",
-    "Weather_DniMoy",
-    "Weather_Ghi10",
-    "Weather_Ghi90",
-    "Weather_GhiMoy",
-]
+from smartgrid.common.constants import (
+    BASIC_WEATHER_COLUMNS,
+    DEFAULT_TARGET_NAME,
+    DEFAULT_WEATHER_COLUMNS,
+    IRRADIANCE_WEATHER_COLUMNS,
+    N_STEPS_PER_DAY,
+)
 
 
 def add_calendar_features(df: pd.DataFrame, holiday_dates: set, special_dates: set, date_col: str) -> pd.DataFrame:
@@ -175,3 +156,85 @@ def build_feature_table(
     feature_cols = list(dict.fromkeys(feature_cols))
     df = df.dropna(subset=feature_cols + [target_col]).reset_index(drop=True)
     return df, feature_cols
+
+
+def prepare_forecast_base_frame(
+    target_df: pd.DataFrame,
+    holiday_dates: set,
+    special_dates: set,
+    date_col: str = "Date",
+    include_calendar: bool = True,
+    include_cyclical_time: bool = False,
+) -> pd.DataFrame:
+    out = target_df.copy()
+    if include_calendar or include_cyclical_time:
+        out = add_calendar_features(out, holiday_dates, special_dates, date_col)
+    if include_cyclical_time:
+        out = add_cyclical_time_features(out)
+    return out
+
+
+def build_forecast_feature_row(
+    target_row: pd.Series,
+    context_series: pd.Series,
+    feature_columns: list[str],
+    *,
+    include_temperature: bool = True,
+    include_manual_daily_lags: bool = True,
+    lag_days: list[int] | tuple[int, ...] = (7, 1, 2, 3, 4, 5, 6),
+    include_lag_aggregates: bool = False,
+    include_recent_dynamics: bool = False,
+    include_weather: bool = False,
+    weather_mode: str | None = None,
+    weather_columns: list[str] | None = None,
+    fallback_row: pd.Series | None = None,
+) -> dict[str, float]:
+    ts = pd.Timestamp(target_row["Date"])
+    row = target_row.to_dict()
+
+    if include_temperature and "Airtemp" not in row and fallback_row is not None:
+        row["Airtemp"] = fallback_row.get("Airtemp")
+
+    lag_values: dict[str, float] = {}
+    if include_manual_daily_lags:
+        for lag_day in lag_days:
+            lag_value = context_series.get(ts - pd.Timedelta(days=lag_day))
+            lag_key = f"lag_d{lag_day}"
+            row[lag_key] = lag_value
+            lag_values[lag_key] = lag_value
+
+        if include_lag_aggregates and lag_values:
+            lag_series = pd.Series(lag_values, dtype=float)
+            row["lag_mean"] = float(lag_series.mean())
+            row["lag_std"] = float(lag_series.std())
+            row["lag_min"] = float(lag_series.min())
+            row["lag_max"] = float(lag_series.max())
+
+    if include_recent_dynamics:
+        prev_values = context_series[context_series.index < ts].tail(6)
+        row["lag_t1"] = prev_values.iloc[-1] if len(prev_values) >= 1 else pd.NA
+        row["lag_t2"] = prev_values.iloc[-2] if len(prev_values) >= 2 else pd.NA
+        row["lag_t3"] = prev_values.iloc[-3] if len(prev_values) >= 3 else pd.NA
+        row["delta_t1"] = (
+            row["lag_t1"] - row["lag_t2"]
+            if pd.notna(row["lag_t1"]) and pd.notna(row["lag_t2"])
+            else pd.NA
+        )
+        row["delta_t2"] = (
+            row["lag_t2"] - row["lag_t3"]
+            if pd.notna(row["lag_t2"]) and pd.notna(row["lag_t3"])
+            else pd.NA
+        )
+        row["rolling_mean_6"] = float(prev_values.mean()) if len(prev_values) >= 1 else pd.NA
+        row["rolling_std_6"] = float(prev_values.std()) if len(prev_values) >= 2 else pd.NA
+
+    if include_weather:
+        selected_weather_cols = resolve_weather_columns(weather_mode, weather_columns)
+        for col in selected_weather_cols:
+            if pd.isna(row.get(col)) and fallback_row is not None and col in fallback_row.index:
+                row[col] = fallback_row[col]
+
+    if include_temperature and pd.isna(row.get("Airtemp")) and fallback_row is not None:
+        row["Airtemp"] = fallback_row.get("Airtemp")
+
+    return {column: row.get(column, pd.NA) for column in feature_columns}
