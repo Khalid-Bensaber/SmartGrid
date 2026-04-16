@@ -1,5 +1,5 @@
 consumption:
-  default_dataset: clean_v1
+  default_dataset: full_2020_2026
   datasets:
     clean_v1:
       description: Canonical cleaned dataset used by the training and replay pipeline.
@@ -19,7 +19,7 @@ consumption:
       weather_csv: data/processed/Weather data 2020-2026.csv
       holidays_xlsx: data/processed/Holidays.xlsx
     full_2020_2026:
-      description: Consolidated 2020-2026 pair kept for compatibility analyses.
+      description: Official consolidated 2020-2026 dataset for strict day-ahead training, replay, and demos.
       historical_csv: data/processed/conso/Consumption data 2020-2026.csv
       forecast_csv: data/processed/conso/Consumption forecast 2020-2026.csv
       weather_csv: data/processed/Weather data 2020-2026.csv

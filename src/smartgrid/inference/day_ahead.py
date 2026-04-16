@@ -8,9 +8,13 @@ from pathlib import Path
 import pandas as pd
 import torch
 
-from smartgrid.common.constants import DEFAULT_TARGET_NAME
+from smartgrid.common.constants import (
+    DEFAULT_TARGET_NAME,
+    STRICT_DAY_AHEAD_MODE,
+)
 from smartgrid.common.paths import ForecastPaths, build_forecast_paths
 from smartgrid.common.utils import get_device
+from smartgrid.data.catalog import resolve_consumption_data_config
 from smartgrid.data.loaders import (
     build_target_day_frame,
     extract_truth_for_day,
@@ -20,16 +24,19 @@ from smartgrid.data.loaders import (
     merge_weather_on_history,
     slice_history_before_date,
 )
+from smartgrid.data.timeline import build_timeline_diagnostics, has_complete_day_coverage
 from smartgrid.features.engineering import (
     build_forecast_feature_row,
+    normalize_feature_config,
     prepare_forecast_base_frame,
     resolve_weather_columns,
 )
 from smartgrid.inference.consumption import predict_from_feature_dict
-from smartgrid.registry.model_registry import ConsumptionBundle, load_current_consumption_bundle
 from smartgrid.registry.model_registry import (
+    ConsumptionBundle,
     list_ranked_consumption_bundle_dirs,
     load_consumption_bundle,
+    load_current_consumption_bundle,
 )
 
 
@@ -43,6 +50,7 @@ class ForecastRuntime:
     special_dates: set
     feature_columns: list[str]
     feature_config: dict
+    forecast_mode: str
     data_config: dict
     target_col: str
     date_col: str
@@ -50,6 +58,17 @@ class ForecastRuntime:
     current_dir: Path
     benchmark_csv: Path | None
     allow_fallback: bool
+
+
+@dataclass(slots=True)
+class ReplaySummary:
+    replay_df: pd.DataFrame
+    start_date: str
+    end_date: str
+    requested_model_run_id: str
+    effective_model_run_ids: list[str]
+    fallback_used: bool
+    skipped_days: list[dict[str, str]]
 
 
 def infer_target_date_from_history(hist_df: pd.DataFrame, date_col: str = "Date") -> str:
@@ -82,7 +101,38 @@ def _resolve_feature_columns(bundle: ConsumptionBundle) -> list[str]:
 def _resolve_feature_config(bundle: ConsumptionBundle) -> dict:
     summary = bundle.summary or {}
     training_cfg = bundle.training_config or {}
-    return dict(summary.get("feature_config") or training_cfg.get("features") or {})
+    raw_feature_config = summary.get("feature_config") or training_cfg.get("features") or {}
+    return normalize_feature_config(raw_feature_config)
+
+
+def _resolve_runtime_data_config(
+    bundle: ConsumptionBundle,
+    *,
+    dataset_key: str | None = None,
+    catalog_path: str | Path | None = None,
+    historical_csv: str | Path | None = None,
+    weather_csv: str | Path | None = None,
+    holidays_xlsx: str | Path | None = None,
+) -> dict:
+    bundle_data_config = _resolve_data_config(bundle)
+    return resolve_consumption_data_config(
+        bundle_data_config,
+        dataset_key=dataset_key,
+        catalog_path=catalog_path,
+        overrides={
+            "historical_csv": historical_csv,
+            "weather_csv": weather_csv,
+            "holidays_xlsx": holidays_xlsx,
+        },
+    )
+
+
+def _require_strict_day_ahead_runtime(runtime: ForecastRuntime) -> None:
+    if runtime.forecast_mode != STRICT_DAY_AHEAD_MODE:
+        raise RuntimeError(
+            "This flow only supports strict day-ahead forecasting. "
+            f"Loaded bundle is forecast_mode={runtime.forecast_mode!r}."
+        )
 
 
 def _fill_missing_target_exogenous(
@@ -115,7 +165,8 @@ def _fill_missing_target_exogenous(
             out[col] = out[col].fillna(fallback_value)
             if logger is not None:
                 logger.warning(
-                    "Missing target-day exogenous values for %s. Falling back to last known value=%s.",
+                    "Missing target-day exogenous values for %s. "
+                    "Falling back to last known value=%s.",
                     col,
                     fallback_value,
                 )
@@ -124,39 +175,50 @@ def _fill_missing_target_exogenous(
 
 def build_forecast_runtime(
     *,
-    historical_csv: str | Path,
+    historical_csv: str | Path | None = None,
     current_dir: str | Path = "artifacts/models/consumption/current",
     artifacts_root: str | Path = "artifacts",
+    dataset_key: str | None = None,
+    catalog_path: str | Path | None = None,
     weather_csv: str | Path | None = None,
     holidays_xlsx: str | Path | None = None,
     device_request: str = "auto",
-    benchmark_csv: str | Path | None = "artifacts/benchmarks/consumption_feature_variants.csv",
-    allow_fallback: bool = True,
+    benchmark_csv: str | Path | None = None,
+    allow_fallback: bool = False,
     logger: logging.Logger | None = None,
 ) -> ForecastRuntime:
     device = get_device(device_request)
     bundle = load_current_consumption_bundle(current_dir, device)
-    data_config = _resolve_data_config(bundle)
     feature_config = _resolve_feature_config(bundle)
+    data_config = _resolve_runtime_data_config(
+        bundle,
+        dataset_key=dataset_key,
+        catalog_path=catalog_path,
+        historical_csv=historical_csv,
+        weather_csv=weather_csv,
+        holidays_xlsx=holidays_xlsx,
+    )
     feature_columns = _resolve_feature_columns(bundle)
     date_col = data_config.get("date_col", "Date")
     target_col = data_config.get("target_name", DEFAULT_TARGET_NAME)
+    forecast_mode = feature_config["forecast_mode"]
 
-    hist_df = load_history(historical_csv, date_col=date_col, target_col=target_col)
-    resolved_weather_csv = weather_csv if weather_csv is not None else data_config.get("weather_csv")
-    weather_df = load_weather_history(resolved_weather_csv, date_col=date_col)
+    hist_df = load_history(data_config["historical_csv"], date_col=date_col, target_col=target_col)
+    weather_df = load_weather_history(data_config.get("weather_csv"), date_col=date_col)
     hist_df = merge_weather_on_history(hist_df, weather_df, date_col=date_col)
 
-    resolved_holidays_xlsx = holidays_xlsx if holidays_xlsx is not None else data_config.get("holidays_xlsx")
-    if feature_config.get("include_calendar", True) or feature_config.get("include_cyclical_time", False):
-        if resolved_holidays_xlsx is None:
+    if feature_config.get("include_calendar", True) or feature_config.get(
+        "include_cyclical_time", False
+    ):
+        if data_config.get("holidays_xlsx") is None:
             raise RuntimeError("Holidays workbook is required to rebuild the promoted feature set.")
-        holiday_dates, special_dates = load_holiday_sets(resolved_holidays_xlsx)
+        holiday_dates, special_dates = load_holiday_sets(data_config["holidays_xlsx"])
     else:
         holiday_dates, special_dates = set(), set()
 
     if logger is not None:
         summary = bundle.summary or {}
+        timeline_diagnostics = build_timeline_diagnostics(hist_df[date_col])
         logger.info(
             "Loaded promoted model run_id=%s current_dir=%s device=%s n_features=%s",
             summary.get("run_id"),
@@ -165,10 +227,27 @@ def build_forecast_runtime(
             len(feature_columns),
         )
         logger.info(
+            "Loaded dataset dataset_key=%s description=%s historical_csv=%s "
+            "weather_csv=%s holidays_xlsx=%s forecast_mode=%s",
+            data_config.get("dataset_key"),
+            data_config.get("dataset_description"),
+            data_config.get("historical_csv"),
+            data_config.get("weather_csv"),
+            data_config.get("holidays_xlsx"),
+            forecast_mode,
+        )
+        logger.info(
             "Loaded history rows=%s date_range=[%s, %s]",
             len(hist_df),
             hist_df[date_col].min(),
             hist_df[date_col].max(),
+        )
+        logger.info(
+            "History timeline gaps=%s missing_timestamps=%s segments=%s largest_gap=%s",
+            timeline_diagnostics["gap_count"],
+            timeline_diagnostics["missing_timestamp_count"],
+            timeline_diagnostics["segment_count"],
+            timeline_diagnostics["largest_gap_duration"],
         )
 
     return ForecastRuntime(
@@ -180,6 +259,7 @@ def build_forecast_runtime(
         special_dates=special_dates,
         feature_columns=feature_columns,
         feature_config=feature_config,
+        forecast_mode=forecast_mode,
         data_config=data_config,
         target_col=target_col,
         date_col=date_col,
@@ -196,12 +276,20 @@ def _build_target_feature_frame(
     logger: logging.Logger | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series | None]:
     target_date = str(pd.Timestamp(target_date).date())
-    history_before = slice_history_before_date(runtime.historical_df, target_date, date_col=runtime.date_col)
+    history_before = slice_history_before_date(
+        runtime.historical_df,
+        target_date,
+        date_col=runtime.date_col,
+    )
     if history_before.empty:
         raise RuntimeError(f"No historical rows are available before target date {target_date}.")
 
     fallback_row = history_before.iloc[-1]
-    target_df = build_target_day_frame(target_date, weather=runtime.weather_df, date_col=runtime.date_col)
+    target_df = build_target_day_frame(
+        target_date,
+        weather=runtime.weather_df,
+        date_col=runtime.date_col,
+    )
     target_df = prepare_forecast_base_frame(
         target_df=target_df,
         holiday_dates=runtime.holiday_dates,
@@ -210,26 +298,35 @@ def _build_target_feature_frame(
         include_calendar=runtime.feature_config.get("include_calendar", True),
         include_cyclical_time=runtime.feature_config.get("include_cyclical_time", False),
     )
-    target_df = _fill_missing_target_exogenous(target_df, runtime.feature_config, fallback_row, logger=logger)
+    target_df = _fill_missing_target_exogenous(
+        target_df,
+        runtime.feature_config,
+        fallback_row,
+        logger=logger,
+    )
     context_series = history_before.set_index(runtime.date_col)[runtime.target_col].sort_index()
     return history_before, target_df, context_series, fallback_row
 
 
 def collect_missing_features(runtime: ForecastRuntime, target_date: str) -> set[str]:
+    _require_strict_day_ahead_runtime(runtime)
     _, target_df, context_series, fallback_row = _build_target_feature_frame(runtime, target_date)
     missing: set[str] = set()
-    simulated_context = context_series.copy()
 
     for _, target_row in target_df.iterrows():
         feature_row = build_forecast_feature_row(
             target_row=target_row,
-            context_series=simulated_context,
+            context_series=context_series,
             feature_columns=runtime.feature_columns,
             include_temperature=runtime.feature_config.get("include_temperature", True),
             include_manual_daily_lags=runtime.feature_config.get("include_manual_daily_lags", True),
             lag_days=runtime.feature_config.get("lag_days", [7, 1, 2, 3, 4, 5, 6]),
             include_lag_aggregates=runtime.feature_config.get("include_lag_aggregates", False),
             include_recent_dynamics=runtime.feature_config.get("include_recent_dynamics", False),
+            include_shifted_recent_dynamics=runtime.feature_config.get(
+                "include_shifted_recent_dynamics",
+                False,
+            ),
             include_weather=runtime.feature_config.get("include_weather", False),
             weather_mode=runtime.feature_config.get("weather_mode"),
             weather_columns=runtime.feature_config.get("weather_columns"),
@@ -237,11 +334,6 @@ def collect_missing_features(runtime: ForecastRuntime, target_date: str) -> set[
         )
         row_missing = [column for column, value in feature_row.items() if pd.isna(value)]
         missing.update(row_missing)
-
-        # Simulate recursive day-ahead availability for recent-dynamics models.
-        timestamp = pd.Timestamp(target_row[runtime.date_col])
-        if timestamp not in simulated_context.index:
-            simulated_context.loc[timestamp] = 0.0
 
     return missing
 
@@ -251,6 +343,7 @@ def select_runtime_for_target_date(
     target_date: str,
     logger: logging.Logger | None = None,
 ) -> ForecastRuntime:
+    _require_strict_day_ahead_runtime(runtime)
     current_missing = collect_missing_features(runtime, target_date)
     if not current_missing:
         return runtime
@@ -263,7 +356,8 @@ def select_runtime_for_target_date(
 
     if logger is not None:
         logger.warning(
-            "Current promoted model run_id=%s is incompatible with target_date=%s missing_features=%s. Searching fallback model.",
+            "Current promoted model run_id=%s is incompatible with target_date=%s "
+            "missing_features=%s. Searching fallback model.",
             (runtime.bundle.summary or {}).get("run_id"),
             target_date,
             sorted(current_missing),
@@ -278,6 +372,10 @@ def select_runtime_for_target_date(
         if bundle_dir.resolve() == runtime.bundle.bundle_dir.resolve():
             continue
         candidate_bundle = load_consumption_bundle(bundle_dir, runtime.device)
+        candidate_feature_config = _resolve_feature_config(candidate_bundle)
+        if candidate_feature_config["forecast_mode"] != runtime.forecast_mode:
+            continue
+        candidate_data_config = _resolve_runtime_data_config(candidate_bundle)
         candidate_runtime = ForecastRuntime(
             bundle=candidate_bundle,
             device=runtime.device,
@@ -286,10 +384,11 @@ def select_runtime_for_target_date(
             holiday_dates=runtime.holiday_dates,
             special_dates=runtime.special_dates,
             feature_columns=_resolve_feature_columns(candidate_bundle),
-            feature_config=_resolve_feature_config(candidate_bundle),
-            data_config=_resolve_data_config(candidate_bundle),
-            target_col=_resolve_data_config(candidate_bundle).get("target_name", runtime.target_col),
-            date_col=_resolve_data_config(candidate_bundle).get("date_col", runtime.date_col),
+            feature_config=candidate_feature_config,
+            forecast_mode=candidate_feature_config["forecast_mode"],
+            data_config=candidate_data_config,
+            target_col=candidate_data_config.get("target_name", runtime.target_col),
+            date_col=candidate_data_config.get("date_col", runtime.date_col),
             artifacts_root=runtime.artifacts_root,
             current_dir=runtime.current_dir,
             benchmark_csv=runtime.benchmark_csv,
@@ -312,10 +411,19 @@ def select_runtime_for_target_date(
     )
 
 
-def forecast_target_day(runtime: ForecastRuntime, target_date: str, logger: logging.Logger | None = None) -> pd.DataFrame:
+def forecast_target_day(
+    runtime: ForecastRuntime,
+    target_date: str,
+    logger: logging.Logger | None = None,
+) -> pd.DataFrame:
+    _require_strict_day_ahead_runtime(runtime)
     target_date = str(pd.Timestamp(target_date).date())
     runtime = select_runtime_for_target_date(runtime, target_date, logger=logger)
-    _, target_df, context_series, fallback_row = _build_target_feature_frame(runtime, target_date, logger=logger)
+    _, target_df, context_series, fallback_row = _build_target_feature_frame(
+        runtime,
+        target_date,
+        logger=logger,
+    )
     predictions: list[float] = []
 
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -330,6 +438,10 @@ def forecast_target_day(runtime: ForecastRuntime, target_date: str, logger: logg
             lag_days=runtime.feature_config.get("lag_days", [7, 1, 2, 3, 4, 5, 6]),
             include_lag_aggregates=runtime.feature_config.get("include_lag_aggregates", False),
             include_recent_dynamics=runtime.feature_config.get("include_recent_dynamics", False),
+            include_shifted_recent_dynamics=runtime.feature_config.get(
+                "include_shifted_recent_dynamics",
+                False,
+            ),
             include_weather=runtime.feature_config.get("include_weather", False),
             weather_mode=runtime.feature_config.get("weather_mode"),
             weather_columns=runtime.feature_config.get("weather_columns"),
@@ -338,7 +450,8 @@ def forecast_target_day(runtime: ForecastRuntime, target_date: str, logger: logg
         missing = [column for column, value in feature_row.items() if pd.isna(value)]
         if missing:
             raise RuntimeError(
-                f"Cannot forecast {target_row[runtime.date_col]} because features are missing: {missing}"
+                f"Cannot forecast {target_row[runtime.date_col]} because features "
+                f"are missing: {missing}"
             )
 
         prediction = predict_from_feature_dict(
@@ -349,8 +462,6 @@ def forecast_target_day(runtime: ForecastRuntime, target_date: str, logger: logg
             runtime.feature_columns,
             runtime.device,
         )
-        timestamp = pd.Timestamp(target_row[runtime.date_col])
-        context_series.loc[timestamp] = prediction
         predictions.append(prediction)
 
     forecast_df = pd.DataFrame(
@@ -360,6 +471,8 @@ def forecast_target_day(runtime: ForecastRuntime, target_date: str, logger: logg
             "model_run_id": model_run_id,
             "generated_at": generated_at,
             "target_date": target_date,
+            "dataset_key": runtime.data_config.get("dataset_key"),
+            "forecast_mode": runtime.forecast_mode,
         }
     )
 
@@ -379,6 +492,62 @@ def forecast_target_day(runtime: ForecastRuntime, target_date: str, logger: logg
         )
 
     return forecast_df
+
+
+def forecast_next_day(
+    runtime: ForecastRuntime,
+    logger: logging.Logger | None = None,
+) -> pd.DataFrame:
+    target_date = infer_target_date_from_history(runtime.historical_df, runtime.date_col)
+    return forecast_target_day(runtime, target_date, logger=logger)
+
+
+def replay_forecast_period(
+    runtime: ForecastRuntime,
+    start_date: str,
+    end_date: str,
+    logger: logging.Logger | None = None,
+) -> ReplaySummary:
+    _require_strict_day_ahead_runtime(runtime)
+    all_days = pd.date_range(start_date, end_date, freq="D")
+    day_frames: list[pd.DataFrame] = []
+    skipped_days: list[dict[str, str]] = []
+
+    for day in all_days:
+        target_date = str(day.date())
+        truth_df = extract_truth_for_day(runtime.historical_df, target_date, date_col=runtime.date_col)
+        if not has_complete_day_coverage(truth_df[runtime.date_col], target_date):
+            reason = "Incomplete or missing target-day truth coverage."
+            skipped_days.append({"target_date": target_date, "reason": reason})
+            if logger is not None:
+                logger.warning("Skipping replay target_date=%s: %s", target_date, reason)
+            continue
+
+        try:
+            day_frames.append(forecast_target_day(runtime, target_date, logger=logger))
+        except RuntimeError as exc:
+            reason = str(exc)
+            skipped_days.append({"target_date": target_date, "reason": reason})
+            if logger is not None:
+                logger.warning("Skipping replay target_date=%s: %s", target_date, reason)
+
+    replay_df = pd.concat(day_frames, ignore_index=True) if day_frames else pd.DataFrame()
+    requested_model_run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
+    effective_model_run_ids = (
+        sorted(str(x) for x in replay_df["model_run_id"].dropna().unique().tolist())
+        if not replay_df.empty
+        else []
+    )
+    fallback_used = any(model_id != requested_model_run_id for model_id in effective_model_run_ids)
+    return ReplaySummary(
+        replay_df=replay_df,
+        start_date=str(pd.Timestamp(start_date).date()),
+        end_date=str(pd.Timestamp(end_date).date()),
+        requested_model_run_id=requested_model_run_id,
+        effective_model_run_ids=effective_model_run_ids,
+        fallback_used=fallback_used,
+        skipped_days=skipped_days,
+    )
 
 
 def write_forecast_outputs(

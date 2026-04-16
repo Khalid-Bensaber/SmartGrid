@@ -9,15 +9,19 @@ from smartgrid.common.logging import build_log_path, setup_logger
 from smartgrid.common.utils import ensure_dir
 from smartgrid.inference.day_ahead import (
     build_forecast_runtime,
+    forecast_next_day,
     forecast_target_day,
-    infer_target_date_from_history,
     write_forecast_outputs,
 )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Forecast one full target day using the promoted model only")
-    parser.add_argument("--historical-csv", required=True)
+    parser = argparse.ArgumentParser(
+        description="Forecast one full target day using the promoted model only"
+    )
+    parser.add_argument("--historical-csv", default=None)
+    parser.add_argument("--dataset-key", default=None)
+    parser.add_argument("--catalog-path", default=None)
     parser.add_argument("--target-date", default=None)
     parser.add_argument("--weather-csv", default=None)
     parser.add_argument("--holidays-xlsx", default=None)
@@ -25,7 +29,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--artifacts-root", default="artifacts")
     parser.add_argument("--output-csv", default=None)
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--disable-fallback", action="store_true")
+    parser.add_argument("--benchmark-csv", default=None)
+    parser.add_argument("--allow-fallback", action="store_true")
     return parser.parse_args()
 
 
@@ -35,25 +40,46 @@ def main() -> None:
     requested_target = args.target_date or "auto"
     logger = setup_logger(
         "smartgrid.predict",
-        log_file=build_log_path(args.artifacts_root, "predict", f"{stamp}__forecast_{requested_target}.log"),
+        log_file=build_log_path(
+            args.artifacts_root,
+            "predict",
+            f"{stamp}__forecast_{requested_target}.log",
+        ),
     )
 
     runtime = build_forecast_runtime(
         historical_csv=args.historical_csv,
         current_dir=args.current_dir,
         artifacts_root=args.artifacts_root,
+        dataset_key=args.dataset_key,
+        catalog_path=args.catalog_path,
         weather_csv=args.weather_csv,
         holidays_xlsx=args.holidays_xlsx,
         device_request=args.device,
-        allow_fallback=not args.disable_fallback,
+        benchmark_csv=args.benchmark_csv,
+        allow_fallback=args.allow_fallback,
         logger=logger,
     )
-    target_date = args.target_date or infer_target_date_from_history(runtime.historical_df, runtime.date_col)
+    target_date = args.target_date
     logger.info("Forecast request target_date=%s requested=%s", target_date, requested_target)
 
-    forecast_df = forecast_target_day(runtime, target_date, logger=logger)
-    effective_run_id = str(forecast_df["model_run_id"].iloc[0]) if not forecast_df.empty else "unknown"
-    output_paths = write_forecast_outputs(forecast_df, runtime.artifacts_root, target_date, effective_run_id)
+    forecast_df = (
+        forecast_target_day(runtime, target_date, logger=logger)
+        if target_date
+        else forecast_next_day(runtime, logger=logger)
+    )
+    effective_target_date = (
+        str(forecast_df["target_date"].iloc[0]) if not forecast_df.empty else target_date
+    )
+    effective_run_id = (
+        str(forecast_df["model_run_id"].iloc[0]) if not forecast_df.empty else "unknown"
+    )
+    output_paths = write_forecast_outputs(
+        forecast_df,
+        runtime.artifacts_root,
+        effective_target_date,
+        effective_run_id,
+    )
 
     custom_output = None
     if args.output_csv is not None:
@@ -70,9 +96,11 @@ def main() -> None:
     print(
         json.dumps(
             {
-                "target_date": target_date,
+                "target_date": effective_target_date,
                 "points": int(len(forecast_df)),
                 "model_run_id": effective_run_id,
+                "dataset_key": runtime.data_config.get("dataset_key"),
+                "forecast_mode": runtime.forecast_mode,
                 "current_output_csv": str(output_paths.current_output_path.resolve()),
                 "archive_output_csv": str(output_paths.archive_output_path.resolve()),
                 "custom_output_csv": str(custom_output.resolve()) if custom_output else None,

@@ -70,3 +70,6 @@ N_STEPS_PER_DAY = 144
 FORECAST_FREQ = "10min"
 TOL_REL = 0.01
 TOL_ABS = 5000.0
+
+STRICT_DAY_AHEAD_MODE = "strict_day_ahead"
+INTRADAY_REFORECAST_MODE = "intraday_reforecast"

@@ -8,13 +8,14 @@ UV ?= uv
 PYTHON ?= python
 RUN = $(UV) run $(PYTHON)
 
-CONFIG ?= configs/consumption/mlp_baseline.yaml
+CONFIG ?= configs/consumption/mlp_strict_day_ahead_baseline.yaml
 ANALYSIS_DAYS ?= 1
 TARGET_DATE ?= 2026-01-15
 START_DATE ?= 2026-01-01
 END_DATE ?= 2026-01-31
 RUN_ID ?=
 MODEL_REFS ?=
+DATASET_KEY ?= full_2020_2026
 
 HISTORICAL_CSV ?= data/processed/conso/Consumption data 2020-2026.csv
 BENCHMARK_CSV ?= data/processed/conso/Consumption forecast 2020-2026.csv
@@ -25,9 +26,10 @@ API_HOST ?= 0.0.0.0
 API_PORT ?= 8000
 
 BENCHMARK_CONFIGS ?= \
-	configs/consumption/mlp_baseline.yaml \
-	configs/consumption/mlp_weather_basic.yaml \
-	configs/consumption/mlp_weather_all.yaml
+	configs/consumption/mlp_strict_day_ahead_baseline.yaml \
+	configs/consumption/mlp_strict_day_ahead_weather_basic.yaml \
+	configs/consumption/mlp_strict_day_ahead_cyclical_weather_basic.yaml \
+	configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics.yaml
 
 help:
 	@echo "Smart Grid make targets"
@@ -86,10 +88,10 @@ serve-api:
 	$(UV) run uvicorn smartgrid.api:app --reload --host $(API_HOST) --port $(API_PORT)
 
 train-consumption:
-	$(RUN) scripts/train_consumption.py --config "$(CONFIG)" --analysis-days "$(ANALYSIS_DAYS)"
+	$(RUN) scripts/train_consumption.py --config "$(CONFIG)" --analysis-days "$(ANALYSIS_DAYS)" --dataset-key "$(DATASET_KEY)"
 
 train-promote:
-	$(RUN) scripts/train_consumption.py --config "$(CONFIG)" --analysis-days "$(ANALYSIS_DAYS)" --promote
+	$(RUN) scripts/train_consumption.py --config "$(CONFIG)" --analysis-days "$(ANALYSIS_DAYS)" --dataset-key "$(DATASET_KEY)" --promote
 
 promote-consumption:
 	@test -n "$(RUN_ID)" || (echo "RUN_ID is required. Example: make promote-consumption RUN_ID=consumption_mlp_..."; exit 1)
@@ -97,6 +99,7 @@ promote-consumption:
 
 predict-next-day:
 	$(RUN) scripts/predict_next_day.py \
+		--dataset-key "$(DATASET_KEY)" \
 		--historical-csv "$(HISTORICAL_CSV)" \
 		--weather-csv "$(WEATHER_CSV)" \
 		--holidays-xlsx "$(HOLIDAYS_XLSX)" \
@@ -104,6 +107,7 @@ predict-next-day:
 
 replay-period:
 	$(RUN) scripts/replay_period.py \
+		--dataset-key "$(DATASET_KEY)" \
 		--historical-csv "$(HISTORICAL_CSV)" \
 		--weather-csv "$(WEATHER_CSV)" \
 		--holidays-xlsx "$(HOLIDAYS_XLSX)" \
@@ -111,11 +115,12 @@ replay-period:
 		--end-date "$(END_DATE)"
 
 benchmark-features:
-	$(RUN) scripts/benchmark_feature_variants.py $(BENCHMARK_CONFIGS) --analysis-days "$(ANALYSIS_DAYS)"
+	$(RUN) scripts/benchmark_feature_variants.py $(BENCHMARK_CONFIGS) --analysis-days "$(ANALYSIS_DAYS)" --dataset-key "$(DATASET_KEY)" --historical-csv "$(HISTORICAL_CSV)" --weather-csv "$(WEATHER_CSV)" --holidays-xlsx "$(HOLIDAYS_XLSX)"
 
 benchmark-replay:
 	@test -n "$(MODEL_REFS)" || (echo "MODEL_REFS is required. Example: make benchmark-replay MODEL_REFS='run_a run_b'"; exit 1)
 	$(RUN) scripts/benchmark_replay_models.py \
+		--dataset-key "$(DATASET_KEY)" \
 		--historical-csv "$(HISTORICAL_CSV)" \
 		--weather-csv "$(WEATHER_CSV)" \
 		--holidays-xlsx "$(HOLIDAYS_XLSX)" \

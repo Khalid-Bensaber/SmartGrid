@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from smartgrid.common.utils import load_yaml
 
 DEFAULT_DATA_CATALOG_PATH = Path("configs/common/data_sources.yaml")
-DEFAULT_CONSUMPTION_DATASET_KEY = "clean_v1"
+DEFAULT_CONSUMPTION_DATASET_KEY = "full_2020_2026"
 PATH_FIELDS = (
     "historical_csv",
     "forecast_csv",

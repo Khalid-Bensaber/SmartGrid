@@ -10,23 +10,31 @@ import pandas as pd
 from smartgrid.common.logging import build_log_path, setup_logger
 from smartgrid.common.utils import ensure_dir
 from smartgrid.evaluation.reporting import evaluate_forecast_frame, save_json
-from smartgrid.inference.day_ahead import build_forecast_runtime, forecast_target_day
+from smartgrid.inference.day_ahead import build_forecast_runtime, replay_forecast_period
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Benchmark several registered models on a replay period")
-    parser.add_argument("--historical-csv", required=True)
+    parser = argparse.ArgumentParser(
+        description="Benchmark several registered models on a replay period"
+    )
+    parser.add_argument("--historical-csv", default=None)
+    parser.add_argument("--dataset-key", default=None)
+    parser.add_argument("--catalog-path", default=None)
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
     parser.add_argument("--weather-csv", default=None)
     parser.add_argument("--holidays-xlsx", default=None)
     parser.add_argument("--artifacts-root", default="artifacts")
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--benchmark-csv", default=None)
     parser.add_argument("--allow-fallback", action="store_true")
     parser.add_argument(
         "model_refs",
         nargs="+",
-        help="Run ids or bundle directories to benchmark, e.g. consumption_mlp_... or artifacts/runs/consumption/<run_id>",
+        help=(
+            "Run ids or bundle directories to benchmark, "
+            "e.g. consumption_mlp_... or artifacts/runs/consumption/<run_id>"
+        ),
     )
     return parser.parse_args()
 
@@ -53,7 +61,9 @@ def build_model_metadata(runtime, bundle_dir: Path) -> dict:
         "config_path": config_path,
         "config_name": config_name,
         "experiment_name": summary.get("experiment_name"),
+        "dataset_key": summary.get("dataset_key"),
         "feature_config": feature_cfg,
+        "forecast_mode": feature_cfg.get("forecast_mode"),
         "feature_columns": summary.get("feature_columns"),
         "n_features": summary.get("n_features"),
         "hidden_layers": hidden_layers,
@@ -74,7 +84,9 @@ def main() -> None:
         ),
     )
 
-    out_dir = ensure_dir(artifacts_root / "benchmarks" / "replay" / f"{stamp}__{args.start_date}__{args.end_date}")
+    out_dir = ensure_dir(
+        artifacts_root / "benchmarks" / "replay" / f"{stamp}__{args.start_date}__{args.end_date}"
+    )
     all_days = pd.date_range(args.start_date, args.end_date, freq="D")
     summary_rows = []
     manifest = {
@@ -91,32 +103,35 @@ def main() -> None:
             historical_csv=args.historical_csv,
             current_dir=bundle_dir,
             artifacts_root=artifacts_root,
+            dataset_key=args.dataset_key,
+            catalog_path=args.catalog_path,
             weather_csv=args.weather_csv,
             holidays_xlsx=args.holidays_xlsx,
             device_request=args.device,
+            benchmark_csv=args.benchmark_csv,
             allow_fallback=args.allow_fallback,
             logger=logger,
         )
         requested_run_id = (runtime.bundle.summary or {}).get("run_id", bundle_dir.name)
         model_metadata = build_model_metadata(runtime, bundle_dir)
-        logger.info("Benchmarking replay for requested_model_run_id=%s bundle_dir=%s", requested_run_id, bundle_dir)
+        logger.info(
+            "Benchmarking replay for requested_model_run_id=%s bundle_dir=%s",
+            requested_run_id,
+            bundle_dir,
+        )
 
         model_dir = ensure_dir(out_dir / requested_run_id)
-        day_frames = []
-        for day in all_days:
-            target_date = str(day.date())
-            day_forecast = forecast_target_day(runtime, target_date, logger=logger)
-            day_frames.append(day_forecast)
-
-        replay_df = pd.concat(day_frames, ignore_index=True) if day_frames else pd.DataFrame()
+        replay = replay_forecast_period(runtime, args.start_date, args.end_date, logger=logger)
+        replay_df = replay.replay_df
+        skipped_days = replay.skipped_days
         replay_csv = model_dir / "replay_forecasts.csv"
         replay_df.to_csv(replay_csv, index=False)
 
         overall_metrics = evaluate_forecast_frame(replay_df)
         per_day_metrics = []
         per_day_model_usage = []
-        effective_model_run_ids = sorted(str(x) for x in replay_df["model_run_id"].dropna().unique().tolist()) if not replay_df.empty else []
-        fallback_used = any(model_id != requested_run_id for model_id in effective_model_run_ids)
+        effective_model_run_ids = replay.effective_model_run_ids
+        fallback_used = replay.fallback_used
 
         if not replay_df.empty:
             for target_date, day_df in replay_df.groupby("target_date", dropna=False):
@@ -126,7 +141,9 @@ def main() -> None:
                 per_day_model_usage.append(
                     {
                         "target_date": target_date,
-                        "model_run_ids": sorted(str(x) for x in day_df["model_run_id"].dropna().unique().tolist()),
+                        "model_run_ids": sorted(
+                            str(x) for x in day_df["model_run_id"].dropna().unique().tolist()
+                        ),
                     }
                 )
 
@@ -135,10 +152,16 @@ def main() -> None:
             "effective_model_run_ids": effective_model_run_ids,
             "fallback_enabled": bool(args.allow_fallback),
             "fallback_used": fallback_used,
+            "n_requested_days": int(len(all_days)),
+            "n_forecasted_days": int(len(all_days) - len(skipped_days)),
+            "n_skipped_days": int(len(skipped_days)),
+            "skipped_days": skipped_days,
             "start_date": args.start_date,
             "end_date": args.end_date,
             "n_days": int(len(all_days)),
             "n_rows": int(len(replay_df)),
+            "dataset_key": runtime.data_config.get("dataset_key"),
+            "forecast_mode": runtime.forecast_mode,
             "overall_metrics": overall_metrics,
             "per_day_metrics": per_day_metrics,
             "per_day_model_usage": per_day_model_usage,
@@ -154,6 +177,9 @@ def main() -> None:
                 "effective_model_run_ids": "|".join(effective_model_run_ids),
                 "fallback_enabled": bool(args.allow_fallback),
                 "fallback_used": fallback_used,
+                "n_requested_days": int(len(all_days)),
+                "n_forecasted_days": int(len(all_days) - len(skipped_days)),
+                "n_skipped_days": int(len(skipped_days)),
                 "start_date": args.start_date,
                 "end_date": args.end_date,
                 "n_days": int(len(all_days)),

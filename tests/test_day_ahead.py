@@ -59,6 +59,36 @@ def test_build_forecast_feature_row_uses_only_past_context():
     assert feature_row["delta_t1"] == 10.0
 
 
+def test_build_forecast_feature_row_supports_shifted_recent_dynamics():
+    context_index = pd.date_range("2025-01-01 00:00:00", periods=144 * 2, freq="10min")
+    context_series = pd.Series(range(len(context_index)), index=context_index, dtype=float)
+    target_row = pd.Series(
+        {
+            "Date": pd.Timestamp("2025-01-03 00:20:00"),
+            "minute_of_day": 20,
+            "Airtemp": 12.0,
+        }
+    )
+
+    feature_row = build_forecast_feature_row(
+        target_row=target_row,
+        context_series=context_series,
+        feature_columns=[
+            "prev_day_lag_t1",
+            "prev_day_lag_t2",
+            "prev_day_lag_t3",
+            "prev_day_delta_t1",
+        ],
+        include_temperature=True,
+        include_shifted_recent_dynamics=True,
+    )
+
+    assert feature_row["prev_day_lag_t1"] == context_series[pd.Timestamp("2025-01-02 00:10:00")]
+    assert feature_row["prev_day_lag_t2"] == context_series[pd.Timestamp("2025-01-02 00:00:00")]
+    assert feature_row["prev_day_lag_t3"] == context_series[pd.Timestamp("2025-01-01 23:50:00")]
+    assert feature_row["prev_day_delta_t1"] == 1.0
+
+
 def test_infer_target_date_from_history_uses_day_after_last_available_day():
     hist_df = pd.DataFrame(
         {
