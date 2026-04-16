@@ -1,4 +1,7 @@
 print(">>> SMARTGRID API VERSION COMPLETE CHARGÉE <<<")
+import os
+print("FILE LOADED:", __file__)
+print("WORKING DIR:", os.getcwd())
 from __future__ import annotations
 
 from pathlib import Path
