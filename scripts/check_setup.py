@@ -60,7 +60,7 @@ def main() -> int:
         missing_any = missing_any or bool(missing)
 
     if missing_any:
-        print("Setup incomplete: add the dataset files listed above under data/ before training, replay, or full test runs.")
+        print("Setup incomplete: pull the missing tracked files or add them locally under data/ before training, replay, or inference.")
         return 1
 
     print("Setup looks complete.")

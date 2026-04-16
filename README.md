@@ -1,297 +1,191 @@
 # Smart Grid
 
-Electricity consumption forecasting pipeline centered on `src/smartgrid/`.
+Smart Grid is a Python project for electricity consumption forecasting. It includes data loading, feature engineering, PyTorch training, run promotion, day-ahead inference, replay benchmarking, notebooks, and a small FastAPI service.
 
-## Overview
+## Repository Status
 
-This project currently focuses mainly on the consumption workflow:
-- training MLP models with PyTorch
-- promoting a run to `current`
-- forecasting day+1 (next-day prediction)
-- replaying historical periods over a date range
-- benchmarking multiple configurations or runs
-- analysis notebooks in `notebooks/experiments/`
+This repository is currently public, and the processed datasets under `data/processed/` are intentionally versioned so the project can be cloned and used on a new machine without a separate data bootstrap step.
 
-## Environment
+What is tracked in Git:
+- application code in `src/`
+- CLI wrappers in `scripts/`
+- configuration in `configs/`
+- tests in `tests/`
+- notebooks in `notebooks/`
+- processed datasets in `data/processed/`
+- reproducible dependency metadata in `pyproject.toml` and `uv.lock`
 
-Required Python version: `>= 3.12`
+What stays local:
+- generated outputs in `artifacts/`
+- caches, virtual environments, and editor files
+- raw, interim, and external data folders unless you add files there on purpose
 
-Recommended installation with `uv`:
+## Requirements
 
-```bash
-uv sync --all-groups
-```
+- Python `3.12`
+- `uv`
 
-Useful variants:
-
-```bash
-uv sync
-uv sync --group dev
-uv sync --all-groups
-```
-
-Available `make` shortcuts:
+Check your versions:
 
 ```bash
-make install
-make install-core
-make install-dev
-make install-dev-legacy
-make doctor
-make lint
-make test
-make verify
-make train-consumption
-make serve-api
+python --version
+uv --version
 ```
 
 ## Fresh Setup On A New PC
 
-After cloning the repository, the minimal sequence is:
+Once your latest changes are pushed, a new machine should only need:
 
 ```bash
+git clone <your-repo-url>
+cd smart-grid
 git checkout dev
+git pull origin dev
 uv sync --all-groups
-make test
-make doctor
+make verify
 ```
 
-Important:
-- `uv` and Python `3.12` must be installed on the machine first.
-- the repository includes the code, configs, tests, notebooks, and lockfile
-- the repository does **not** include the real datasets under `data/processed/`
-- `make test` validates the codebase and packaging without requiring the private datasets
-- `make doctor` tells you exactly which local data files are still missing and exits non-zero until they are present
+If `make verify` passes, the repository is ready for day-to-day work on that machine.
 
-So on a new PC, cloning from GitHub is enough to install the Python project and build the package, but not enough to train, replay, or run the full data-aware workflow until the dataset files are copied into `data/`.
+## Daily Workflow With Make
 
-## Data and protocol
+The `Makefile` is meant to be the main entry point for common tasks. Run this to see the available commands:
 
-The single source of truth for datasets is:
+```bash
+make
+```
+
+Most useful targets:
+
+```bash
+make install
+make doctor
+make test
+make build
+make verify
+make notebook
+make serve-api
+make train-consumption
+make train-promote
+make promote-consumption RUN_ID=consumption_mlp_...
+make predict-next-day TARGET_DATE=2026-01-15
+make replay-period START_DATE=2026-01-01 END_DATE=2026-01-31
+make benchmark-features
+make benchmark-replay MODEL_REFS="consumption_mlp_run_a consumption_mlp_run_b"
+```
+
+These targets use `uv run`, so you do not need to activate a virtual environment manually.
+
+## Dataset Catalog
+
+The single source of truth for data paths is:
 
 ```bash
 configs/common/data_sources.yaml
 ```
 
-The consumption configs (`configs/consumption/*.yaml`) are currently aligned to:
-- `data.dataset_key: full_2020_2026`
-- `train_end_date: '2025-09-30'`
-- `val_end_date: '2025-12-31'`
+The main consumption dataset keys currently available are:
+- `clean_v1`
+- `full_2020_2026`
+- `legacy_2020_2025`
 
-So today:
-- train: up to `2025-09-30`
-- validation: from `2025-10-01` to `2025-12-31`
-- test: only `2026`
+The default day-to-day files used by the convenience commands in the `Makefile` are:
+- `data/processed/conso/Consumption data 2020-2026.csv`
+- `data/processed/conso/Consumption forecast 2020-2026.csv`
+- `data/processed/Weather data 2020-2026.csv`
+- `data/processed/Holidays.xlsx`
 
-Files used by `full_2020_2026`:
-- historical: `data/processed/conso/Consumption data 2020-2026.csv`
-- legacy forecasts: `data/processed/conso/Consumption forecast 2020-2026.csv`
-- weather: `data/processed/Weather data 2020-2026.csv`
-- holidays: `data/processed/Holidays.xlsx`
-
-## Main commands
-
-The wrappers in `scripts/` are the simplest commands to run locally.
-There are also installed entry points (`smartgrid-*`), but this README uses the wrappers to stay explicit.
-
-### 1. Train a model
-
-Baseline example:
+You can validate that the expected dataset files are present with:
 
 ```bash
-uv run python scripts/train_consumption.py \
-  --config configs/consumption/mlp_baseline.yaml
+make doctor
 ```
 
-Example with immediate promotion:
+## Common Commands
+
+### Train a model
+
+Baseline training:
 
 ```bash
-uv run python scripts/train_consumption.py \
-  --config configs/consumption/mlp_weather_basic.yaml \
-  --promote
+make train-consumption
 ```
 
-Example forcing the analysis day in the run exports:
+Train a different config:
 
 ```bash
-uv run python scripts/train_consumption.py \
-  --config configs/consumption/mlp_weather_all.yaml \
-  --analysis-date 2026-01-15 \
-  --analysis-days 3
+make train-consumption CONFIG=configs/consumption/mlp_weather_basic.yaml
 ```
 
-Example overriding dataset or file paths:
+Train and promote immediately:
 
 ```bash
-uv run python scripts/train_consumption.py \
-  --config configs/consumption/mlp_baseline.yaml \
-  --dataset-key full_2020_2026 \
-  --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" \
-  --benchmark-csv "data/processed/conso/Consumption forecast 2020-2026.csv" \
-  --weather-csv "data/processed/Weather data 2020-2026.csv" \
-  --holidays-xlsx "data/processed/Holidays.xlsx"
+make train-promote CONFIG=configs/consumption/mlp_weather_all.yaml ANALYSIS_DAYS=3
 ```
 
-Main outputs of a training run:
-- `artifacts/runs/consumption/<RUN_ID>/`
-- `artifacts/exports/consumption/<RUN_ID>/backtest.csv`
-- `artifacts/exports/consumption/<RUN_ID>/selected_day_<DATE>.csv`
-- `artifacts/models/consumption/current/` if `--promote` is used
-
-### 2. Promote an existing run
+### Promote an existing run
 
 ```bash
-uv run python scripts/promote_consumption_run.py \
-  --run-id consumption_mlp_20260415T205933Z
+make promote-consumption RUN_ID=consumption_mlp_20260415T205933Z
 ```
 
-### 3. Predict the full next day (day+1)
-
-Using the currently promoted model:
+### Forecast the next day
 
 ```bash
-uv run python scripts/predict_next_day.py \
-  --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" \
-  --weather-csv "data/processed/Weather data 2020-2026.csv" \
-  --holidays-xlsx "data/processed/Holidays.xlsx" \
-  --target-date 2026-01-15 \
-  --output-csv artifacts/forecasts/manual/forecast_2026-01-15.csv
+make predict-next-day TARGET_DATE=2026-01-15
 ```
 
-Without automatic fallback to another compatible run:
+### Replay a historical period
 
 ```bash
-uv run python scripts/predict_next_day.py \
-  --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" \
-  --weather-csv "data/processed/Weather data 2020-2026.csv" \
-  --holidays-xlsx "data/processed/Holidays.xlsx" \
-  --target-date 2026-01-15 \
-  --disable-fallback
+make replay-period START_DATE=2026-01-01 END_DATE=2026-01-31
 ```
 
-### 4. Replay a historical period with the current model
-
-Simple replay:
+### Compare feature configurations
 
 ```bash
-uv run python scripts/replay_period.py \
-  --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" \
-  --weather-csv "data/processed/Weather data 2020-2026.csv" \
-  --holidays-xlsx "data/processed/Holidays.xlsx" \
-  --start-date 2026-01-01 \
-  --end-date 2026-01-31
+make benchmark-features
 ```
 
-Replay with one CSV exported per day:
+Override the compared configs if needed:
 
 ```bash
-uv run python scripts/replay_period.py \
-  --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" \
-  --weather-csv "data/processed/Weather data 2020-2026.csv" \
-  --holidays-xlsx "data/processed/Holidays.xlsx" \
-  --start-date 2026-01-01 \
-  --end-date 2026-01-31 \
-  --write-per-day
+make benchmark-features \
+  BENCHMARK_CONFIGS="configs/consumption/mlp_baseline.yaml configs/consumption/mlp_weather_basic.yaml"
 ```
 
-Main outputs:
-- `artifacts/replays/consumption/<STAMP>__<START>__<END>/replay_forecasts.csv`
-- `artifacts/replays/consumption/<STAMP>__<START>__<END>/replay_metrics.json`
-
-### 5. Benchmark multiple training configs
-
-Compare several YAML configs under the same protocol:
+### Compare several trained runs on the same replay window
 
 ```bash
-uv run python scripts/benchmark_feature_variants.py \
-  configs/consumption/mlp_baseline.yaml \
-  configs/consumption/mlp_weather_basic.yaml \
-  configs/consumption/mlp_weather_all.yaml \
-  --output-csv artifacts/benchmarks/consumption_feature_variants.csv \
-  --analysis-days 1
+make benchmark-replay \
+  START_DATE=2026-01-01 \
+  END_DATE=2026-01-31 \
+  MODEL_REFS="consumption_mlp_20260410T062646Z consumption_mlp_20260415T205933Z"
 ```
 
-The benchmark CSV aggregates fields such as:
-- `run_id`
-- `selected_analysis_day`
-- `MAE`
-- `RMSE`
-- split sizes
-- feature information
+## Running Without Make
 
-### 6. Replay-benchmark multiple already-trained runs
-
-Compare multiple runs over the same date range without retraining:
+If you prefer direct commands, the wrappers in `scripts/` remain available:
 
 ```bash
-uv run python scripts/benchmark_replay_models.py \
-  --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" \
-  --weather-csv "data/processed/Weather data 2020-2026.csv" \
-  --holidays-xlsx "data/processed/Holidays.xlsx" \
-  --start-date 2026-01-01 \
-  --end-date 2026-01-31 \
-  consumption_mlp_20260410T062646Z \
-  consumption_mlp_20260414T210959Z \
-  consumption_mlp_20260415T205933Z
+uv run python scripts/train_consumption.py --config configs/consumption/mlp_baseline.yaml
+uv run python scripts/promote_consumption_run.py --run-id consumption_mlp_20260415T205933Z
+uv run python scripts/predict_next_day.py --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" --weather-csv "data/processed/Weather data 2020-2026.csv" --holidays-xlsx "data/processed/Holidays.xlsx" --target-date 2026-01-15
+uv run python scripts/replay_period.py --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" --weather-csv "data/processed/Weather data 2020-2026.csv" --holidays-xlsx "data/processed/Holidays.xlsx" --start-date 2026-01-01 --end-date 2026-01-31
 ```
-
-With fallback enabled:
-
-```bash
-uv run python scripts/benchmark_replay_models.py \
-  --historical-csv "data/processed/conso/Consumption data 2020-2026.csv" \
-  --weather-csv "data/processed/Weather data 2020-2026.csv" \
-  --holidays-xlsx "data/processed/Holidays.xlsx" \
-  --start-date 2026-01-01 \
-  --end-date 2026-01-31 \
-  --allow-fallback \
-  consumption_mlp_20260415T205933Z
-```
-
-Main outputs:
-- `artifacts/benchmarks/replay/<STAMP>__<START>__<END>/replay_benchmark_summary.csv`
-- `artifacts/benchmarks/replay/<STAMP>__<START>__<END>/replay_benchmark_manifest.json`
-- one subfolder per benchmarked run
-
-## Demo notebook
-
-Main notebook:
-
-```bash
-notebooks/experiments/SmartGrid_Demo_Globale.ipynb
-```
-
-Start:
-
-```bash
-uv run jupyter lab
-```
-
-Important notebook variables:
-- `DATASET_KEY`: dataset in use
-- `RUN_TRAINING_BENCHMARK`: whether to train models
-- `RUN_REPLAY_BENCHMARK`: whether to run multi-day replay
-- `REPLAY_REQUIRE_FRESH_RUNS`: if `False`, reuse existing runs
-- `DETAILED_ANALYSIS_DATE`: day (day+1) to recompute for detailed analysis
-- `REPLAY_START_DATE` / `REPLAY_END_DATE`: replay range
-
-Recommended usage:
-- train models once
-- then reuse existing runs
-- run replays or analyses on other dates without retraining
 
 ## API
 
-The FastAPI server loads the promoted model from:
+The FastAPI app loads the promoted model bundle from:
 
 ```bash
 artifacts/models/consumption/current
 ```
 
-Run the API:
+Start the API locally:
 
 ```bash
-uv run uvicorn smartgrid.api:app --reload --host 0.0.0.0 --port 8000
+make serve-api
 ```
 
 Main endpoints:
@@ -300,42 +194,51 @@ Main endpoints:
 - `GET /consumption/model-info`
 - `POST /consumption/predict-from-features`
 
-## Quality and verification
+## Notebooks
 
-Lint:
-
-```bash
-uv run ruff check src tests scripts
-```
-
-Tests:
+Launch JupyterLab with:
 
 ```bash
-uv run pytest
+make notebook
 ```
 
-Environment and data readiness:
+Main notebook:
+- `notebooks/experiments/SmartGrid_Demo_Globale.ipynb`
+
+## Validation
+
+Code quality and packaging checks:
 
 ```bash
-uv run python scripts/check_setup.py
+make lint
+make test
+make build
+make verify
 ```
 
-Quick package compilation:
+## Output Directories
 
-```bash
-uv run python -m compileall src
-```
+Generated outputs are written under `artifacts/`, especially:
+- `artifacts/runs/consumption/`
+- `artifacts/exports/consumption/`
+- `artifacts/models/consumption/current/`
+- `artifacts/replays/consumption/`
+- `artifacts/benchmarks/`
+- `artifacts/logs/`
 
-## Useful tree
+These outputs are intentionally ignored by Git.
 
-- `configs/common/data_sources.yaml`: central dataset catalogue
-- `configs/consumption/`: consumption model configs
-- `scripts/`: local CLI wrappers
-- `src/smartgrid/data/`: loading and temporal splits
+## Project Layout
+
+- `src/smartgrid/`: core package
+- `src/smartgrid/data/`: catalog resolution, loading, and temporal splits
 - `src/smartgrid/features/`: feature engineering
-- `src/smartgrid/training/`: training and artifact management
-- `src/smartgrid/inference/`: prediction and replay
-- `src/smartgrid/registry/`: promotion and bundle loading
-- `src/smartgrid/api/`: FastAPI server
-- `artifacts/`: execution outputs
-- `notebooks/experiments/`: analysis notebooks
+- `src/smartgrid/training/`: model training and bundle persistence
+- `src/smartgrid/inference/`: day-ahead inference and replay runtime
+- `src/smartgrid/registry/`: run promotion and model bundle loading
+- `src/smartgrid/api/`: FastAPI application
+- `scripts/`: explicit wrapper scripts
+- `configs/`: datasets and experiment configurations
+- `tests/`: automated checks
+- `data/processed/`: versioned processed datasets
+- `artifacts/`: generated local outputs
