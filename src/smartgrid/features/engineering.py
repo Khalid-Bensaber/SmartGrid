@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any, Mapping
 
 import pandas as pd
 
@@ -8,12 +9,40 @@ from smartgrid.common.constants import (
     BASIC_WEATHER_COLUMNS,
     DEFAULT_TARGET_NAME,
     DEFAULT_WEATHER_COLUMNS,
+    FORECAST_FREQ,
+    INTRADAY_REFORECAST_MODE,
     IRRADIANCE_WEATHER_COLUMNS,
     N_STEPS_PER_DAY,
+    STRICT_DAY_AHEAD_MODE,
 )
 
+RECENT_DYNAMICS_COLUMNS = [
+    "lag_t1",
+    "lag_t2",
+    "lag_t3",
+    "delta_t1",
+    "delta_t2",
+    "rolling_mean_6",
+    "rolling_std_6",
+]
 
-def add_calendar_features(df: pd.DataFrame, holiday_dates: set, special_dates: set, date_col: str) -> pd.DataFrame:
+SHIFTED_RECENT_DYNAMICS_COLUMNS = [
+    "prev_day_lag_t1",
+    "prev_day_lag_t2",
+    "prev_day_lag_t3",
+    "prev_day_delta_t1",
+    "prev_day_delta_t2",
+    "prev_day_rolling_mean_6",
+    "prev_day_rolling_std_6",
+]
+
+
+def add_calendar_features(
+    df: pd.DataFrame,
+    holiday_dates: set,
+    special_dates: set,
+    date_col: str,
+) -> pd.DataFrame:
     out = df.copy()
     dt = out[date_col]
 
@@ -31,21 +60,32 @@ def add_calendar_features(df: pd.DataFrame, holiday_dates: set, special_dates: s
 
 def add_cyclical_time_features(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    out["minute_of_day_sin"] = out["minute_of_day"].apply(lambda x: math.sin(2 * math.pi * x / (24 * 60)))
-    out["minute_of_day_cos"] = out["minute_of_day"].apply(lambda x: math.cos(2 * math.pi * x / (24 * 60)))
+    out["minute_of_day_sin"] = out["minute_of_day"].apply(
+        lambda x: math.sin(2 * math.pi * x / (24 * 60))
+    )
+    out["minute_of_day_cos"] = out["minute_of_day"].apply(
+        lambda x: math.cos(2 * math.pi * x / (24 * 60))
+    )
     out["day_of_year_sin"] = out["day_of_year"].apply(lambda x: math.sin(2 * math.pi * x / 366.0))
     out["day_of_year_cos"] = out["day_of_year"].apply(lambda x: math.cos(2 * math.pi * x / 366.0))
     return out
 
 
-def add_manual_lag_features(df: pd.DataFrame, target_col: str, lag_days: list[int] | tuple[int, ...]) -> pd.DataFrame:
+def add_manual_lag_features(
+    df: pd.DataFrame,
+    target_col: str,
+    lag_days: list[int] | tuple[int, ...],
+) -> pd.DataFrame:
     out = df.copy()
     for lag_day in lag_days:
         out[f"lag_d{lag_day}"] = out[target_col].shift(N_STEPS_PER_DAY * lag_day)
     return out
 
 
-def add_lag_aggregate_features(df: pd.DataFrame, lag_days: list[int] | tuple[int, ...]) -> pd.DataFrame:
+def add_lag_aggregate_features(
+    df: pd.DataFrame,
+    lag_days: list[int] | tuple[int, ...],
+) -> pd.DataFrame:
     out = df.copy()
     lag_cols = [f"lag_d{lag_day}" for lag_day in lag_days]
     if not lag_cols:
@@ -69,7 +109,71 @@ def add_recent_dynamics_features(df: pd.DataFrame, target_col: str) -> pd.DataFr
     return out
 
 
-def resolve_weather_columns(weather_mode: str | None, weather_columns: list[str] | None) -> list[str]:
+def add_shifted_recent_dynamics_features(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    out = df.copy()
+    out["prev_day_lag_t1"] = out[target_col].shift(N_STEPS_PER_DAY + 1)
+    out["prev_day_lag_t2"] = out[target_col].shift(N_STEPS_PER_DAY + 2)
+    out["prev_day_lag_t3"] = out[target_col].shift(N_STEPS_PER_DAY + 3)
+    out["prev_day_delta_t1"] = out[target_col].shift(N_STEPS_PER_DAY + 1) - out[target_col].shift(
+        N_STEPS_PER_DAY + 2
+    )
+    out["prev_day_delta_t2"] = out[target_col].shift(N_STEPS_PER_DAY + 2) - out[target_col].shift(
+        N_STEPS_PER_DAY + 3
+    )
+    shifted = out[target_col].shift(N_STEPS_PER_DAY + 1)
+    out["prev_day_rolling_mean_6"] = shifted.rolling(6).mean()
+    out["prev_day_rolling_std_6"] = shifted.rolling(6).std()
+    return out
+
+
+def resolve_forecast_mode(
+    forecast_mode: str | None,
+    *,
+    include_recent_dynamics: bool = False,
+) -> str:
+    if forecast_mode is None:
+        return INTRADAY_REFORECAST_MODE if include_recent_dynamics else STRICT_DAY_AHEAD_MODE
+
+    valid_modes = {STRICT_DAY_AHEAD_MODE, INTRADAY_REFORECAST_MODE}
+    if forecast_mode not in valid_modes:
+        raise ValueError(
+            f"Unknown forecast_mode={forecast_mode!r}. Expected one of {sorted(valid_modes)}."
+        )
+    return forecast_mode
+
+
+def normalize_feature_config(feature_config: Mapping[str, Any] | None) -> dict[str, Any]:
+    normalized = dict(feature_config or {})
+    normalized.setdefault("include_calendar", True)
+    normalized.setdefault("include_temperature", True)
+    normalized.setdefault("include_manual_daily_lags", True)
+    normalized.setdefault("include_cyclical_time", False)
+    normalized.setdefault("include_lag_aggregates", False)
+    normalized.setdefault("include_recent_dynamics", False)
+    normalized.setdefault("include_shifted_recent_dynamics", False)
+    normalized.setdefault("include_weather", False)
+    normalized.setdefault("lag_days", [7, 1, 2, 3, 4, 5, 6])
+    normalized["forecast_mode"] = resolve_forecast_mode(
+        normalized.get("forecast_mode"),
+        include_recent_dynamics=bool(normalized.get("include_recent_dynamics", False)),
+    )
+
+    if (
+        normalized["forecast_mode"] == STRICT_DAY_AHEAD_MODE
+        and normalized["include_recent_dynamics"]
+    ):
+        raise ValueError(
+            "Strict day-ahead feature sets cannot use include_recent_dynamics because "
+            "they depend on same-day target observations."
+        )
+
+    return normalized
+
+
+def resolve_weather_columns(
+    weather_mode: str | None,
+    weather_columns: list[str] | None,
+) -> list[str]:
     if weather_columns:
         return weather_columns
     if weather_mode == "basic":
@@ -94,12 +198,24 @@ def build_feature_table(
     include_cyclical_time: bool = False,
     include_lag_aggregates: bool = False,
     include_recent_dynamics: bool = False,
+    include_shifted_recent_dynamics: bool = False,
     include_weather: bool = False,
     weather_mode: str | None = None,
     weather_columns: list[str] | None = None,
+    forecast_mode: str | None = None,
 ):
     df = hist_df.copy()
     feature_cols: list[str] = []
+    resolved_forecast_mode = resolve_forecast_mode(
+        forecast_mode,
+        include_recent_dynamics=include_recent_dynamics,
+    )
+
+    if resolved_forecast_mode == STRICT_DAY_AHEAD_MODE and include_recent_dynamics:
+        raise ValueError(
+            "Strict day-ahead features cannot include recent intraday dynamics derived "
+            "from target-day truth."
+        )
 
     if include_calendar or include_cyclical_time:
         df = add_calendar_features(df, holiday_dates, special_dates, date_col)
@@ -137,15 +253,11 @@ def build_feature_table(
 
     if include_recent_dynamics:
         df = add_recent_dynamics_features(df, target_col)
-        feature_cols.extend([
-            "lag_t1",
-            "lag_t2",
-            "lag_t3",
-            "delta_t1",
-            "delta_t2",
-            "rolling_mean_6",
-            "rolling_std_6",
-        ])
+        feature_cols.extend(RECENT_DYNAMICS_COLUMNS)
+
+    if include_shifted_recent_dynamics:
+        df = add_shifted_recent_dynamics_features(df, target_col)
+        feature_cols.extend(SHIFTED_RECENT_DYNAMICS_COLUMNS)
 
     if include_weather:
         selected_weather_cols = resolve_weather_columns(weather_mode, weather_columns)
@@ -184,6 +296,7 @@ def build_forecast_feature_row(
     lag_days: list[int] | tuple[int, ...] = (7, 1, 2, 3, 4, 5, 6),
     include_lag_aggregates: bool = False,
     include_recent_dynamics: bool = False,
+    include_shifted_recent_dynamics: bool = False,
     include_weather: bool = False,
     weather_mode: str | None = None,
     weather_columns: list[str] | None = None,
@@ -191,6 +304,7 @@ def build_forecast_feature_row(
 ) -> dict[str, float]:
     ts = pd.Timestamp(target_row["Date"])
     row = target_row.to_dict()
+    step = pd.Timedelta(FORECAST_FREQ)
 
     if include_temperature and "Airtemp" not in row and fallback_row is not None:
         row["Airtemp"] = fallback_row.get("Airtemp")
@@ -227,6 +341,39 @@ def build_forecast_feature_row(
         )
         row["rolling_mean_6"] = float(prev_values.mean()) if len(prev_values) >= 1 else pd.NA
         row["rolling_std_6"] = float(prev_values.std()) if len(prev_values) >= 2 else pd.NA
+
+    if include_shifted_recent_dynamics:
+        previous_day_anchor = ts - pd.Timedelta(days=1)
+        prev_day_values = [
+            context_series.get(previous_day_anchor - step),
+            context_series.get(previous_day_anchor - 2 * step),
+            context_series.get(previous_day_anchor - 3 * step),
+        ]
+        row["prev_day_lag_t1"] = prev_day_values[0]
+        row["prev_day_lag_t2"] = prev_day_values[1]
+        row["prev_day_lag_t3"] = prev_day_values[2]
+        row["prev_day_delta_t1"] = (
+            prev_day_values[0] - prev_day_values[1]
+            if pd.notna(prev_day_values[0]) and pd.notna(prev_day_values[1])
+            else pd.NA
+        )
+        row["prev_day_delta_t2"] = (
+            prev_day_values[1] - prev_day_values[2]
+            if pd.notna(prev_day_values[1]) and pd.notna(prev_day_values[2])
+            else pd.NA
+        )
+        prev_day_window_index = pd.date_range(
+            end=previous_day_anchor - step,
+            periods=6,
+            freq=FORECAST_FREQ,
+        )
+        prev_day_window = context_series.reindex(prev_day_window_index)
+        row["prev_day_rolling_mean_6"] = (
+            float(prev_day_window.mean()) if len(prev_day_window.dropna()) == 6 else pd.NA
+        )
+        row["prev_day_rolling_std_6"] = (
+            float(prev_day_window.std()) if len(prev_day_window.dropna()) == 6 else pd.NA
+        )
 
     if include_weather:
         selected_weather_cols = resolve_weather_columns(weather_mode, weather_columns)

@@ -85,8 +85,8 @@ configs/common/data_sources.yaml
 ```
 
 The main consumption dataset keys currently available are:
+- `full_2020_2026` (official strict day-ahead dataset)
 - `clean_v1`
-- `full_2020_2026`
 - `legacy_2020_2025`
 
 The default day-to-day files used by the convenience commands in the `Makefile` are:
@@ -105,7 +105,7 @@ make doctor
 
 ### Train a model
 
-Baseline training:
+Strict day-ahead baseline training:
 
 ```bash
 make train-consumption
@@ -114,13 +114,13 @@ make train-consumption
 Train a different config:
 
 ```bash
-make train-consumption CONFIG=configs/consumption/mlp_weather_basic.yaml
+make train-consumption CONFIG=configs/consumption/mlp_strict_day_ahead_cyclical_weather_basic.yaml
 ```
 
 Train and promote immediately:
 
 ```bash
-make train-promote CONFIG=configs/consumption/mlp_weather_all.yaml ANALYSIS_DAYS=3
+make train-promote CONFIG=configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics.yaml ANALYSIS_DAYS=3
 ```
 
 ### Promote an existing run
@@ -151,7 +151,7 @@ Override the compared configs if needed:
 
 ```bash
 make benchmark-features \
-  BENCHMARK_CONFIGS="configs/consumption/mlp_baseline.yaml configs/consumption/mlp_weather_basic.yaml"
+  BENCHMARK_CONFIGS="configs/consumption/mlp_strict_day_ahead_baseline.yaml configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics.yaml"
 ```
 
 ### Compare several trained runs on the same replay window
@@ -192,7 +192,13 @@ Main endpoints:
 - `GET /`
 - `GET /health`
 - `GET /consumption/model-info`
+- `POST /consumption/forecast/next-day`
+- `POST /consumption/forecast/by-date`
+- `POST /consumption/replay`
 - `POST /consumption/predict-from-features`
+
+The business-facing forecast and replay routes now use the strict day-ahead engine.
+`POST /consumption/predict-from-features` remains available as a lower-level diagnostic endpoint.
 
 ## Notebooks
 
