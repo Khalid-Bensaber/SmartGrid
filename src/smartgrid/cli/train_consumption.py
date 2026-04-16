@@ -106,7 +106,7 @@ def main() -> None:
     weather = load_weather_history(data_cfg.get("weather_csv"), date_col=data_cfg["date_col"])
     hist = merge_weather_on_history(hist, weather, date_col=data_cfg["date_col"])
 
-    feat_df, feature_cols = build_feature_table(
+    feat_df, feature_cols, feature_diagnostics = build_feature_table(
         hist_df=hist,
         holiday_dates=holiday_dates,
         special_dates=special_dates,
@@ -124,7 +124,31 @@ def main() -> None:
         weather_mode=feat_cfg.get("weather_mode"),
         weather_columns=feat_cfg.get("weather_columns"),
         forecast_mode=feat_cfg.get("forecast_mode"),
+        return_diagnostics=True,
     )
+    timeline_summary = feature_diagnostics["timeline"]
+    sample_summary = feature_diagnostics["samples"]
+    logger.info(
+        "Timeline diagnostics rows=%s gaps=%s missing_timestamps=%s segments=%s largest_gap=%s",
+        timeline_summary["row_count"],
+        timeline_summary["gap_count"],
+        timeline_summary["missing_timestamp_count"],
+        timeline_summary["segment_count"],
+        timeline_summary["largest_gap_duration"],
+    )
+    logger.info(
+        "Sample validity rows_before=%s valid_target=%s failing_manual_lags=%s "
+        "failing_recent_window=%s failing_shifted_recent_window=%s failing_exogenous=%s kept=%s",
+        sample_summary["rows_before_filtering"],
+        sample_summary["rows_with_valid_target"],
+        sample_summary["rows_failing_manual_lags"],
+        sample_summary["rows_failing_recent_window"],
+        sample_summary["rows_failing_shifted_recent_window"],
+        sample_summary["rows_failing_exogenous"],
+        sample_summary["rows_kept"],
+    )
+    if feature_diagnostics["missing_feature_counts"]:
+        logger.info("Feature missingness counts=%s", feature_diagnostics["missing_feature_counts"])
     logger.info(
         "Prepared feature table rows=%s n_features=%s feature_columns=%s",
         len(feat_df),
@@ -259,6 +283,9 @@ def main() -> None:
         "feature_columns": feature_cols,
         "feature_config": feat_cfg,
         "forecast_mode": feat_cfg.get("forecast_mode"),
+        "timeline_diagnostics": timeline_summary,
+        "feature_diagnostics": sample_summary,
+        "feature_missingness": feature_diagnostics["missing_feature_counts"],
         "hidden_layers": list(hidden_layers),
         "n_features": int(len(feature_cols)),
         "train_duration_sec": train_duration_sec,
@@ -268,6 +295,8 @@ def main() -> None:
         "final_val_loss": final_val_loss,
         "metrics_basic": basic_metrics,
         **evaluation,
+        "n_history_rows": int(len(hist)),
+        "n_rows_before_validity_filter": int(sample_summary["rows_before_filtering"]),
         "n_total_rows": int(len(feat_df)),
         "n_train_rows": int(len(train_df)),
         "n_val_rows": int(len(val_df)),

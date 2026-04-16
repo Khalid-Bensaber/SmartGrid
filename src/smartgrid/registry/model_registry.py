@@ -79,7 +79,9 @@ def list_ranked_consumption_bundle_dirs(
     benchmark_path = Path(benchmark_csv) if benchmark_csv is not None else None
     if benchmark_path is not None and benchmark_path.exists():
         bench = pd.read_csv(benchmark_path)
-        sort_cols = [col for col in ["MAE", "RMSE"] if col in bench.columns]
+        sort_cols = [
+            col for col in ["replay_MAE", "replay_RMSE", "MAE", "RMSE"] if col in bench.columns
+        ]
         if sort_cols:
             bench = bench.sort_values(sort_cols, ascending=True)
         for _, row in bench.iterrows():

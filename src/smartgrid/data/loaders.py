@@ -15,6 +15,7 @@ from smartgrid.common.constants import (
     WEATHER_RAW_COLUMNS,
     WEATHER_RENAME_MAP,
 )
+from smartgrid.data.timeline import build_timeline_diagnostics, sort_and_validate_timestamps
 
 
 def load_holiday_sets(holidays_xlsx: str | Path) -> tuple[set, set]:
@@ -40,14 +41,13 @@ def load_history(
     target_col: str = DEFAULT_TARGET_NAME,
 ) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    df = df.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
+    df = sort_and_validate_timestamps(df, date_col=date_col)
 
     missing_cols = [c for c in TOTAL_COLUMNS if c not in df.columns]
     if missing_cols:
         raise ValueError(f"Missing required history columns: {missing_cols}")
 
-    total_target = df[TOTAL_COLUMNS].sum(axis=1)
+    total_target = df[TOTAL_COLUMNS].sum(axis=1, min_count=len(TOTAL_COLUMNS))
     df[DEFAULT_TARGET_NAME] = total_target
     if target_col != DEFAULT_TARGET_NAME:
         df[target_col] = total_target
@@ -58,6 +58,7 @@ def load_history(
         else:
             df["Airtemp"] = DEFAULT_AIRTEMP_VALUE
 
+    df.attrs["timeline_diagnostics"] = build_timeline_diagnostics(df[date_col])
     return df
 
 

@@ -115,10 +115,12 @@ def main() -> None:
         if replay_summary.empty:
             raise RuntimeError(f"Replay benchmark returned no rows for config {config_path}.")
         replay_row = replay_summary.iloc[0].to_dict()
+        replay_metric_keys = ["MAE", "RMSE", "Bias(ME)", "MAPE%", "InTolerance%", "count"]
+        replay_metrics = {f"replay_{key}": replay_row.get(key) for key in replay_metric_keys}
         replay_metadata = {
             key: replay_row.get(key)
             for key in replay_row.keys()
-            if key not in {"config_path", "feature_config", "feature_columns"}
+            if key not in {"config_path", "feature_config", "feature_columns", *replay_metric_keys}
         }
 
         row = {
@@ -144,6 +146,7 @@ def main() -> None:
             "classical_RMSE": payload["metrics_model"]["RMSE"],
             "replay_summary_csv": replay_payload["summary_csv"],
             "replay_metrics_json": replay_row.get("metrics_json"),
+            **replay_metrics,
             **replay_metadata,
         }
         rows.append(row)
@@ -151,9 +154,14 @@ def main() -> None:
     df = pd.DataFrame(rows)
     output_path = Path(args.output_csv)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    df.sort_values(by=["MAE", "RMSE"]).to_csv(output_path, index=False)
+    sort_cols = [col for col in ["replay_MAE", "replay_RMSE"] if col in df.columns]
+    sorted_df = df.sort_values(by=sort_cols) if sort_cols else df
+    sorted_df.to_csv(output_path, index=False)
     print(f"[DONE] Wrote benchmark table to {output_path}")
-    print(df.sort_values(by=["MAE", "RMSE"]).to_string(index=False))
+    if sort_cols:
+        print(sorted_df.to_string(index=False))
+    else:
+        print(df.to_string(index=False))
 
 
 if __name__ == "__main__":

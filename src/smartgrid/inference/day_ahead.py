@@ -24,6 +24,7 @@ from smartgrid.data.loaders import (
     merge_weather_on_history,
     slice_history_before_date,
 )
+from smartgrid.data.timeline import build_timeline_diagnostics, has_complete_day_coverage
 from smartgrid.features.engineering import (
     build_forecast_feature_row,
     normalize_feature_config,
@@ -67,6 +68,7 @@ class ReplaySummary:
     requested_model_run_id: str
     effective_model_run_ids: list[str]
     fallback_used: bool
+    skipped_days: list[dict[str, str]]
 
 
 def infer_target_date_from_history(hist_df: pd.DataFrame, date_col: str = "Date") -> str:
@@ -216,6 +218,7 @@ def build_forecast_runtime(
 
     if logger is not None:
         summary = bundle.summary or {}
+        timeline_diagnostics = build_timeline_diagnostics(hist_df[date_col])
         logger.info(
             "Loaded promoted model run_id=%s current_dir=%s device=%s n_features=%s",
             summary.get("run_id"),
@@ -238,6 +241,13 @@ def build_forecast_runtime(
             len(hist_df),
             hist_df[date_col].min(),
             hist_df[date_col].max(),
+        )
+        logger.info(
+            "History timeline gaps=%s missing_timestamps=%s segments=%s largest_gap=%s",
+            timeline_diagnostics["gap_count"],
+            timeline_diagnostics["missing_timestamp_count"],
+            timeline_diagnostics["segment_count"],
+            timeline_diagnostics["largest_gap_duration"],
         )
 
     return ForecastRuntime(
@@ -500,7 +510,27 @@ def replay_forecast_period(
 ) -> ReplaySummary:
     _require_strict_day_ahead_runtime(runtime)
     all_days = pd.date_range(start_date, end_date, freq="D")
-    day_frames = [forecast_target_day(runtime, str(day.date()), logger=logger) for day in all_days]
+    day_frames: list[pd.DataFrame] = []
+    skipped_days: list[dict[str, str]] = []
+
+    for day in all_days:
+        target_date = str(day.date())
+        truth_df = extract_truth_for_day(runtime.historical_df, target_date, date_col=runtime.date_col)
+        if not has_complete_day_coverage(truth_df[runtime.date_col], target_date):
+            reason = "Incomplete or missing target-day truth coverage."
+            skipped_days.append({"target_date": target_date, "reason": reason})
+            if logger is not None:
+                logger.warning("Skipping replay target_date=%s: %s", target_date, reason)
+            continue
+
+        try:
+            day_frames.append(forecast_target_day(runtime, target_date, logger=logger))
+        except RuntimeError as exc:
+            reason = str(exc)
+            skipped_days.append({"target_date": target_date, "reason": reason})
+            if logger is not None:
+                logger.warning("Skipping replay target_date=%s: %s", target_date, reason)
+
     replay_df = pd.concat(day_frames, ignore_index=True) if day_frames else pd.DataFrame()
     requested_model_run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
     effective_model_run_ids = (
@@ -516,6 +546,7 @@ def replay_forecast_period(
         requested_model_run_id=requested_model_run_id,
         effective_model_run_ids=effective_model_run_ids,
         fallback_used=fallback_used,
+        skipped_days=skipped_days,
     )
 
 

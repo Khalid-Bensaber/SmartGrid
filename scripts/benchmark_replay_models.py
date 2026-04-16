@@ -123,6 +123,7 @@ def main() -> None:
         model_dir = ensure_dir(out_dir / requested_run_id)
         replay = replay_forecast_period(runtime, args.start_date, args.end_date, logger=logger)
         replay_df = replay.replay_df
+        skipped_days = replay.skipped_days
         replay_csv = model_dir / "replay_forecasts.csv"
         replay_df.to_csv(replay_csv, index=False)
 
@@ -151,6 +152,10 @@ def main() -> None:
             "effective_model_run_ids": effective_model_run_ids,
             "fallback_enabled": bool(args.allow_fallback),
             "fallback_used": fallback_used,
+            "n_requested_days": int(len(all_days)),
+            "n_forecasted_days": int(len(all_days) - len(skipped_days)),
+            "n_skipped_days": int(len(skipped_days)),
+            "skipped_days": skipped_days,
             "start_date": args.start_date,
             "end_date": args.end_date,
             "n_days": int(len(all_days)),
@@ -172,6 +177,9 @@ def main() -> None:
                 "effective_model_run_ids": "|".join(effective_model_run_ids),
                 "fallback_enabled": bool(args.allow_fallback),
                 "fallback_used": fallback_used,
+                "n_requested_days": int(len(all_days)),
+                "n_forecasted_days": int(len(all_days) - len(skipped_days)),
+                "n_skipped_days": int(len(skipped_days)),
                 "start_date": args.start_date,
                 "end_date": args.end_date,
                 "n_days": int(len(all_days)),

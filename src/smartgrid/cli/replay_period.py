@@ -62,6 +62,7 @@ def main() -> None:
     replay = replay_forecast_period(runtime, args.start_date, args.end_date, logger=logger)
     replay_df = replay.replay_df
     all_days = pd.date_range(replay.start_date, replay.end_date, freq="D")
+    skipped_days = replay.skipped_days
     logger.info(
         "Starting replay from %s to %s total_days=%s",
         replay.start_date,
@@ -107,6 +108,10 @@ def main() -> None:
         "effective_model_run_ids": effective_model_run_ids,
         "fallback_enabled": bool(args.allow_fallback),
         "fallback_used": replay.fallback_used,
+        "n_requested_days": int(len(all_days)),
+        "n_forecasted_days": int(len(all_days) - len(skipped_days)),
+        "n_skipped_days": int(len(skipped_days)),
+        "skipped_days": skipped_days,
         "dataset_key": runtime.data_config.get("dataset_key"),
         "forecast_mode": runtime.forecast_mode,
         "overall_metrics": overall_metrics,
@@ -130,6 +135,9 @@ def main() -> None:
                 "requested_model_run_id": requested_model_run_id,
                 "effective_model_run_ids": effective_model_run_ids,
                 "fallback_used": replay.fallback_used,
+                "n_requested_days": int(len(all_days)),
+                "n_forecasted_days": int(len(all_days) - len(skipped_days)),
+                "n_skipped_days": int(len(skipped_days)),
                 "dataset_key": runtime.data_config.get("dataset_key"),
                 "forecast_mode": runtime.forecast_mode,
                 "output_csv": str(replay_paths.output_csv.resolve()),
