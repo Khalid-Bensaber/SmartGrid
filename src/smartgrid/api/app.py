@@ -1,3 +1,4 @@
+print(">>> SMARTGRID API VERSION COMPLETE CHARGÉE <<<")
 from __future__ import annotations
 
 from pathlib import Path
