@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 
+import smartgrid.inference.consumption as consumption_module
 from smartgrid.common.constants import (
     DEFAULT_TARGET_NAME,
     STRICT_DAY_AHEAD_MODE,
@@ -33,7 +34,6 @@ from smartgrid.features.engineering import (
     prepare_forecast_base_frame,
     resolve_weather_columns,
 )
-from smartgrid.inference.consumption import predict_from_feature_matrix
 from smartgrid.registry.model_registry import (
     ConsumptionBundle,
     list_ranked_consumption_bundle_dirs,
@@ -86,6 +86,52 @@ class ReplayProfile:
     summary: ReplaySummary
     total_replay_sec: float
     per_day_sec: list[dict[str, float | str]]
+
+
+def _predict_feature_rows(
+    runtime: "ForecastRuntime",
+    feature_rows: list[list[float]],
+    logger: logging.Logger | None = None,
+) -> list[float]:
+    matrix_predictor = getattr(consumption_module, "predict_from_feature_matrix", None)
+    if matrix_predictor is not None:
+        return matrix_predictor(
+            runtime.bundle.model,
+            runtime.bundle.x_scaler,
+            runtime.bundle.y_scaler,
+            feature_rows,
+            runtime.device,
+        ).tolist()
+
+    dict_predictor = getattr(consumption_module, "predict_from_feature_dict", None)
+    if dict_predictor is None:
+        raise ImportError(
+            "smartgrid.inference.consumption does not expose a compatible prediction helper. "
+            "Expected predict_from_feature_matrix or predict_from_feature_dict."
+        )
+
+    if logger is not None:
+        logger.warning(
+            "Falling back to row-by-row prediction because predict_from_feature_matrix "
+            "is not available in the currently loaded smartgrid.inference.consumption module."
+        )
+
+    predictions: list[float] = []
+    for feature_row in feature_rows:
+        feature_dict = {
+            column: value for column, value in zip(runtime.feature_columns, feature_row, strict=True)
+        }
+        predictions.append(
+            dict_predictor(
+                runtime.bundle.model,
+                runtime.bundle.x_scaler,
+                runtime.bundle.y_scaler,
+                feature_dict,
+                runtime.feature_columns,
+                runtime.device,
+            )
+        )
+    return predictions
 
 
 def infer_target_date_from_history(hist_df: pd.DataFrame, date_col: str = "Date") -> str:
@@ -447,8 +493,6 @@ def forecast_target_day(
         target_date,
         logger=logger,
     )
-    predictions: list[float] = []
-
     generated_at = datetime.now(timezone.utc).isoformat()
     model_run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
     feature_rows: list[list[float]] = []
@@ -478,13 +522,7 @@ def forecast_target_day(
                 f"are missing: {missing}"
             )
         feature_rows.append([feature_row[column] for column in runtime.feature_columns])
-    predictions = predict_from_feature_matrix(
-        runtime.bundle.model,
-        runtime.bundle.x_scaler,
-        runtime.bundle.y_scaler,
-        feature_rows,
-        runtime.device,
-    ).tolist()
+    predictions = _predict_feature_rows(runtime, feature_rows, logger=logger)
 
     forecast_df = pd.DataFrame(
         {
@@ -575,13 +613,7 @@ def profile_forecast_target_day(
             )
         feature_rows.append([feature_row[column] for column in runtime.feature_columns])
     pred_start = time.perf_counter()
-    predictions = predict_from_feature_matrix(
-        runtime.bundle.model,
-        runtime.bundle.x_scaler,
-        runtime.bundle.y_scaler,
-        feature_rows,
-        runtime.device,
-    ).tolist()
+    predictions = _predict_feature_rows(runtime, feature_rows, logger=logger)
     maybe_cuda_synchronize(runtime.device)
     timings["model_inference_sec"] = time.perf_counter() - pred_start
     timings["forecast_loop_sec"] = time.perf_counter() - loop_start

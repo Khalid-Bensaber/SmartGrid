@@ -1,3 +1,5 @@
+import importlib
+
 import pandas as pd
 
 from smartgrid.data.loaders import build_target_day_frame
@@ -103,6 +105,17 @@ def test_build_target_day_frame_keeps_airtemp_semantics_separate_from_weather():
 
     assert target_df["Weather_AirTemp"].iloc[:3].tolist() == [8.0, 9.0, 10.0]
     assert target_df["Airtemp"].iloc[:3].tolist() == [15.0, 15.0, 15.0]
+
+
+def test_reloading_day_ahead_does_not_require_cached_matrix_predictor(monkeypatch):
+    import smartgrid.inference.consumption as consumption_module
+    import smartgrid.inference.day_ahead as day_ahead_module
+
+    monkeypatch.delattr(consumption_module, "predict_from_feature_matrix", raising=False)
+
+    reloaded = importlib.reload(day_ahead_module)
+
+    assert hasattr(reloaded, "_predict_feature_rows")
 
 
 def test_infer_target_date_from_history_uses_day_after_last_available_day():
