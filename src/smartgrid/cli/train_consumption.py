@@ -231,6 +231,8 @@ def main() -> None:
         resume_checkpoint=args.resume_checkpoint,
         logger=logger,
         profiler=trainer_profiler,
+        batching_strategy=train_cfg.get("batching_strategy", "auto"),
+        max_cuda_resident_bytes=int(train_cfg.get("max_cuda_resident_bytes", 512 * 1024 * 1024)),
     )
     train_duration_sec = time.time() - train_start
     pipeline_timings["dataloader_tensor_creation_sec"] = train_result.loader_prep_sec
@@ -271,11 +273,17 @@ def main() -> None:
     total_export = make_total_export(day_df, data_cfg["date_col"], target_col=target_col)
     total_export_path = paths.exports_dir / "total_forecast_consumption.csv"
     total_export.to_csv(total_export_path, index=False)
+    offline_total_export_path = paths.exports_dir / "offline_test_total_forecast_consumption.csv"
+    total_export.to_csv(offline_total_export_path, index=False)
 
     backtest_path = paths.exports_dir / "backtest.csv"
+    offline_backtest_path = paths.exports_dir / "offline_test_backtest.csv"
     selected_day_path = paths.exports_dir / f"selected_day_{analysis_day}.csv"
+    offline_selected_day_path = paths.exports_dir / f"offline_test_selected_day_{analysis_day}.csv"
     backtest.to_csv(backtest_path, index=False)
+    backtest.to_csv(offline_backtest_path, index=False)
     day_df.to_csv(selected_day_path, index=False)
+    day_df.to_csv(offline_selected_day_path, index=False)
     epochs_ran = len(train_result.history["train_loss"])
     best_val_loss = (
         float(min(train_result.history["val_loss"])) if train_result.history["val_loss"] else None
@@ -319,6 +327,8 @@ def main() -> None:
         "feature_missingness": feature_diagnostics["missing_feature_counts"],
         "hidden_layers": list(hidden_layers),
         "n_features": int(len(feature_cols)),
+        "batching_strategy": train_result.batching_strategy,
+        "resident_data_bytes": int(train_result.resident_data_bytes),
         "train_duration_sec": train_duration_sec,
         "epochs_ran": epochs_ran,
         "best_val_loss": best_val_loss,
@@ -326,6 +336,11 @@ def main() -> None:
         "final_val_loss": final_val_loss,
         "metrics_basic": basic_metrics,
         **evaluation,
+        "offline_test_metrics": evaluation["metrics_model"],
+        "offline_test_naive_weekly_metrics": evaluation["metrics_naive_weekly"],
+        "offline_test_old_legacy_metrics": evaluation["metrics_old_legacy"],
+        "offline_test_metrics_on_old_overlap": evaluation["metrics_model_on_old_overlap"],
+        "offline_test_comparison": evaluation["comparison"],
         "n_history_rows": int(len(hist)),
         "n_rows_before_validity_filter": int(sample_summary["rows_before_filtering"]),
         "n_total_rows": int(len(feat_df)),
@@ -345,13 +360,24 @@ def main() -> None:
         "run_dir": str(paths.run_dir.resolve()),
         "exports_dir": str(paths.exports_dir.resolve()),
         "backtest_csv": str(backtest_path.resolve()),
+        "offline_test_backtest_csv": str(offline_backtest_path.resolve()),
         "day_compare_csv": str(selected_day_path.resolve()),
+        "offline_test_selected_day_csv": str(offline_selected_day_path.resolve()),
         "output_total_csv": str(total_export_path.resolve()),
+        "offline_test_total_csv": str(offline_total_export_path.resolve()),
         "output_notebook_csv": str(notebook_export_path.resolve()),
+        "evaluation_semantics": {
+            "official_business_benchmark": "runtime_replay_forecast",
+            "offline_training_evaluation": "diagnostic_offline_test_split",
+            "legacy_backtest_csv_alias": "backtest.csv is a legacy alias for offline_test_backtest.csv",
+        },
         "export_roles": {
-            "backtest_csv": "full test-period evaluation output",
-            "day_compare_csv": "selected analysis day extracted from the backtest",
-            "output_total_csv": "compact selected-day comparison export",
+            "backtest_csv": "legacy alias of offline_test_backtest_csv",
+            "offline_test_backtest_csv": "diagnostic offline held-out evaluation output",
+            "day_compare_csv": "legacy alias of offline_test_selected_day_csv",
+            "offline_test_selected_day_csv": "selected analysis day extracted from the diagnostic offline test output",
+            "output_total_csv": "legacy alias of offline_test_total_csv",
+            "offline_test_total_csv": "compact selected-day export derived from the diagnostic offline test output",
             "output_notebook_csv": "legacy notebook compatibility export",
         },
     }
@@ -385,6 +411,12 @@ def main() -> None:
         "pipeline_timings_sec": pipeline_timings,
         "trainer": trainer_profiler.to_summary(train_result.history),
     }
+    summary["training_runtime"] = {
+        "batching_strategy": train_result.batching_strategy,
+        "resident_data_bytes": int(train_result.resident_data_bytes),
+        "configured_batching_strategy": train_cfg.get("batching_strategy", "auto"),
+        "max_cuda_resident_bytes": int(train_cfg.get("max_cuda_resident_bytes", 512 * 1024 * 1024)),
+    }
     save_json(paths.run_dir / "run_summary.json", summary)
     save_json(paths.exports_dir / artifacts_cfg["summary_filename"], summary)
 
@@ -410,8 +442,11 @@ def main() -> None:
         "dataset_key": data_cfg.get("dataset_key"),
         "device": str(device),
         "runtime_diagnostics": runtime_diagnostics,
+        "batching_strategy": train_result.batching_strategy,
+        "resident_data_bytes": int(train_result.resident_data_bytes),
         "test_date_min": str(test_df[data_cfg["date_col"]].min()),
         "test_date_max": str(test_df[data_cfg["date_col"]].max()),
+        "offline_test_metrics": evaluation["metrics_model"],
         "metrics_model": evaluation["metrics_model"],
         "profiling_enabled": bool(args.profile),
     }

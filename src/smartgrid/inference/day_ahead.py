@@ -33,7 +33,7 @@ from smartgrid.features.engineering import (
     prepare_forecast_base_frame,
     resolve_weather_columns,
 )
-from smartgrid.inference.consumption import predict_from_feature_dict
+from smartgrid.inference.consumption import predict_from_feature_matrix
 from smartgrid.registry.model_registry import (
     ConsumptionBundle,
     list_ranked_consumption_bundle_dirs,
@@ -451,6 +451,7 @@ def forecast_target_day(
 
     generated_at = datetime.now(timezone.utc).isoformat()
     model_run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
+    feature_rows: list[list[float]] = []
     for _, target_row in target_df.iterrows():
         feature_row = build_forecast_feature_row(
             target_row=target_row,
@@ -476,16 +477,14 @@ def forecast_target_day(
                 f"Cannot forecast {target_row[runtime.date_col]} because features "
                 f"are missing: {missing}"
             )
-
-        prediction = predict_from_feature_dict(
-            runtime.bundle.model,
-            runtime.bundle.x_scaler,
-            runtime.bundle.y_scaler,
-            feature_row,
-            runtime.feature_columns,
-            runtime.device,
-        )
-        predictions.append(prediction)
+        feature_rows.append([feature_row[column] for column in runtime.feature_columns])
+    predictions = predict_from_feature_matrix(
+        runtime.bundle.model,
+        runtime.bundle.x_scaler,
+        runtime.bundle.y_scaler,
+        feature_rows,
+        runtime.device,
+    ).tolist()
 
     forecast_df = pd.DataFrame(
         {
@@ -545,9 +544,9 @@ def profile_forecast_target_day(
     )
     timings["target_day_feature_preparation_sec"] = time.perf_counter() - start
 
-    predictions: list[float] = []
     generated_at = datetime.now(timezone.utc).isoformat()
     model_run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
+    feature_rows: list[list[float]] = []
     loop_start = time.perf_counter()
     for _, target_row in target_df.iterrows():
         feature_row = build_forecast_feature_row(
@@ -574,20 +573,17 @@ def profile_forecast_target_day(
                 f"Cannot forecast {target_row[runtime.date_col]} because features "
                 f"are missing: {missing}"
             )
-        pred_start = time.perf_counter()
-        prediction = predict_from_feature_dict(
-            runtime.bundle.model,
-            runtime.bundle.x_scaler,
-            runtime.bundle.y_scaler,
-            feature_row,
-            runtime.feature_columns,
-            runtime.device,
-        )
-        maybe_cuda_synchronize(runtime.device)
-        timings["model_inference_sec"] = timings.get("model_inference_sec", 0.0) + (
-            time.perf_counter() - pred_start
-        )
-        predictions.append(prediction)
+        feature_rows.append([feature_row[column] for column in runtime.feature_columns])
+    pred_start = time.perf_counter()
+    predictions = predict_from_feature_matrix(
+        runtime.bundle.model,
+        runtime.bundle.x_scaler,
+        runtime.bundle.y_scaler,
+        feature_rows,
+        runtime.device,
+    ).tolist()
+    maybe_cuda_synchronize(runtime.device)
+    timings["model_inference_sec"] = time.perf_counter() - pred_start
     timings["forecast_loop_sec"] = time.perf_counter() - loop_start
 
     forecast_df = pd.DataFrame(

@@ -36,6 +36,9 @@ training:
   # `auto` choisit CUDA si disponible, sinon CPU.
   device: auto
   num_workers: 0
+  # `auto` active les mini-batches residents GPU seulement si le dataset tient confortablement en VRAM.
+  batching_strategy: auto
+  max_cuda_resident_bytes: 536870912
 
 artifacts:
   root_dir: artifacts

@@ -1,5 +1,6 @@
 import pandas as pd
 
+from smartgrid.data.loaders import build_target_day_frame
 from smartgrid.features.engineering import (
     build_forecast_feature_row,
     prepare_forecast_base_frame,
@@ -87,6 +88,21 @@ def test_build_forecast_feature_row_supports_shifted_recent_dynamics():
     assert feature_row["prev_day_lag_t2"] == context_series[pd.Timestamp("2025-01-02 00:00:00")]
     assert feature_row["prev_day_lag_t3"] == context_series[pd.Timestamp("2025-01-01 23:50:00")]
     assert feature_row["prev_day_delta_t1"] == 1.0
+
+
+def test_build_target_day_frame_keeps_airtemp_semantics_separate_from_weather():
+    weather = pd.DataFrame(
+        {
+            "Date": pd.date_range("2025-01-03 00:00:00", periods=3, freq="10min"),
+            "Weather_AirTemp": [8.0, 9.0, 10.0],
+            "Weather_CloudOpacity": [0.0, 1.0, 2.0],
+        }
+    )
+
+    target_df = build_target_day_frame("2025-01-03", weather=weather)
+
+    assert target_df["Weather_AirTemp"].iloc[:3].tolist() == [8.0, 9.0, 10.0]
+    assert target_df["Airtemp"].iloc[:3].tolist() == [15.0, 15.0, 15.0]
 
 
 def test_infer_target_date_from_history_uses_day_after_last_available_day():

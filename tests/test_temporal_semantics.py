@@ -6,7 +6,8 @@ import pytest
 import torch
 from sklearn.preprocessing import MinMaxScaler
 
-from smartgrid.data.loaders import load_history
+from smartgrid.data.loaders import build_target_day_frame, load_history, merge_weather_on_history
+from smartgrid.data.splits import chronological_split_by_dates
 from smartgrid.features.engineering import (
     build_feature_table,
     build_forecast_feature_row,
@@ -204,6 +205,75 @@ def test_training_and_inference_features_match_on_continuous_history():
             assert actual == pytest.approx(expected), column
 
 
+def test_training_and_inference_features_match_with_weather_columns_and_default_airtemp():
+    dates = pd.date_range("2025-01-01 00:00:00", periods=144 * 9, freq="10min")
+    hist = pd.DataFrame(
+        {
+            "Date": dates,
+            "tot": np.arange(len(dates), dtype=float),
+            "Airtemp": 15.0,
+        }
+    )
+    weather = pd.DataFrame(
+        {
+            "Date": dates,
+            "Weather_AirTemp": np.linspace(5.0, 14.0, len(dates)),
+            "Weather_CloudOpacity": np.linspace(0.0, 100.0, len(dates)),
+        }
+    )
+    hist = merge_weather_on_history(hist, weather)
+
+    feature_df, feature_cols = build_feature_table(
+        hist,
+        holiday_dates=set(),
+        special_dates=set(),
+        lag_days=[1, 7],
+        include_calendar=False,
+        include_temperature=True,
+        include_weather=True,
+        weather_mode="basic",
+        keep_invalid=True,
+        include_validity_columns=True,
+    )
+
+    target_ts = pd.Timestamp("2025-01-08 12:00:00")
+    training_row = feature_df.loc[feature_df["Date"] == target_ts].iloc[0]
+    assert training_row["valid_for_training"]
+    assert training_row["Airtemp"] == pytest.approx(15.0)
+    assert training_row["Weather_AirTemp"] != pytest.approx(training_row["Airtemp"])
+
+    target_df = build_target_day_frame("2025-01-08", weather=weather)
+    target_base = prepare_forecast_base_frame(
+        target_df=target_df,
+        holiday_dates=set(),
+        special_dates=set(),
+        date_col="Date",
+        include_calendar=False,
+        include_cyclical_time=False,
+    )
+    target_row = target_base.loc[target_base["Date"] == target_ts].iloc[0]
+    context_series = hist.loc[hist["Date"] < target_ts].set_index("Date")["tot"]
+
+    forecast_row = build_forecast_feature_row(
+        target_row=target_row,
+        context_series=context_series,
+        feature_columns=feature_cols,
+        include_temperature=True,
+        include_manual_daily_lags=True,
+        lag_days=[1, 7],
+        include_weather=True,
+        weather_mode="basic",
+    )
+
+    for column in feature_cols:
+        expected = training_row[column]
+        actual = forecast_row[column]
+        if pd.isna(expected):
+            assert pd.isna(actual), column
+        else:
+            assert actual == pytest.approx(expected), column
+
+
 def test_replay_skips_days_with_incomplete_truth_coverage():
     full_dates = pd.date_range("2025-01-01 00:00:00", periods=144 * 5, freq="10min")
     dates = full_dates[(full_dates < "2025-01-04") | (full_dates >= "2025-01-05")]
@@ -238,3 +308,67 @@ def test_load_history_does_not_build_partial_targets(tmp_path):
 
     assert loaded.loc[0, "tot"] == pytest.approx(10.0)
     assert pd.isna(loaded.loc[1, "tot"])
+
+
+def test_date_only_split_boundaries_include_the_full_day():
+    df = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(
+                [
+                    "2025-01-01 23:50:00",
+                    "2025-01-02 00:00:00",
+                    "2025-01-02 23:50:00",
+                    "2025-01-03 00:00:00",
+                    "2025-01-03 23:50:00",
+                    "2025-01-04 00:00:00",
+                ]
+            )
+        }
+    )
+
+    train_df, val_df, test_df = chronological_split_by_dates(
+        df,
+        "Date",
+        "2025-01-02",
+        "2025-01-03",
+    )
+
+    assert train_df["Date"].tolist() == [
+        pd.Timestamp("2025-01-01 23:50:00"),
+        pd.Timestamp("2025-01-02 00:00:00"),
+        pd.Timestamp("2025-01-02 23:50:00"),
+    ]
+    assert val_df["Date"].tolist() == [
+        pd.Timestamp("2025-01-03 00:00:00"),
+        pd.Timestamp("2025-01-03 23:50:00"),
+    ]
+    assert test_df["Date"].tolist() == [pd.Timestamp("2025-01-04 00:00:00")]
+
+
+def test_timestamp_split_boundaries_remain_exact():
+    df = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(
+                [
+                    "2025-01-02 00:00:00",
+                    "2025-01-02 00:10:00",
+                    "2025-01-03 00:00:00",
+                    "2025-01-03 00:10:00",
+                ]
+            )
+        }
+    )
+
+    train_df, val_df, test_df = chronological_split_by_dates(
+        df,
+        "Date",
+        "2025-01-02 00:00:00",
+        "2025-01-03 00:00:00",
+    )
+
+    assert train_df["Date"].tolist() == [pd.Timestamp("2025-01-02 00:00:00")]
+    assert val_df["Date"].tolist() == [
+        pd.Timestamp("2025-01-02 00:10:00"),
+        pd.Timestamp("2025-01-03 00:00:00"),
+    ]
+    assert test_df["Date"].tolist() == [pd.Timestamp("2025-01-03 00:10:00")]
