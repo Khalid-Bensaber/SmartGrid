@@ -1,0 +1,68 @@
+# Git metadata
+.git
+.gitignore
+.gitattributes
+
+# Python virtual environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.nox/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Notebook checkpoints and editor files
+.ipynb_checkpoints/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.Zone.Identifier
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Raw / local-only data (keep processed datasets in the build context)
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/external/*
+!data/external/.gitkeep
+
+# Runtime outputs and experiment artifacts
+artifacts/
+logs/
+runs/
+mlruns/
+tensorboard/
+*.log
+*.out
+*.err
+*.pid
+*.tmp
+
+# Packaging / local build outputs
+dist/
+build/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Project-specific local scratch folders
+Skills/
