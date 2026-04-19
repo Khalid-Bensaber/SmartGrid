@@ -12,7 +12,10 @@ from smartgrid.common.constants import (
     FORECAST_FREQ,
     INTRADAY_REFORECAST_MODE,
     IRRADIANCE_WEATHER_COLUMNS,
+    RECENT_DYNAMICS_COLUMNS,
+    SHIFTED_RECENT_DYNAMICS_COLUMNS,
     STRICT_DAY_AHEAD_MODE,
+    VALIDITY_COLUMNS,
 )
 from smartgrid.data.timeline import (
     assign_segment_ids,
@@ -21,36 +24,6 @@ from smartgrid.data.timeline import (
     lookup_exact_lag,
     sort_and_validate_timestamps,
 )
-
-RECENT_DYNAMICS_COLUMNS = [
-    "lag_t1",
-    "lag_t2",
-    "lag_t3",
-    "delta_t1",
-    "delta_t2",
-    "rolling_mean_6",
-    "rolling_std_6",
-]
-
-SHIFTED_RECENT_DYNAMICS_COLUMNS = [
-    "prev_day_lag_t1",
-    "prev_day_lag_t2",
-    "prev_day_lag_t3",
-    "prev_day_delta_t1",
-    "prev_day_delta_t2",
-    "prev_day_rolling_mean_6",
-    "prev_day_rolling_std_6",
-]
-
-VALIDITY_COLUMNS = [
-    "segment_id",
-    "valid_target",
-    "valid_manual_lags",
-    "valid_recent_window",
-    "valid_shifted_recent_window",
-    "valid_exogenous",
-    "valid_for_training",
-]
 
 
 def add_calendar_features(
