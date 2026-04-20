@@ -34,7 +34,7 @@ Thumbs.db
 *~
 
 # Windows alternate data streams copied into the repo
-*.Zone.Identifier
+**.Zone.Identifier*
 
 # Local environment files
 .env
@@ -55,6 +55,7 @@ data/external/*
 
 # Training outputs and experiment artifacts
 artifacts/
+**artifacts_backup*/
 logs/
 runs/
 mlruns/

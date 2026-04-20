@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from smartgrid.common.constants import STRICT_DAY_AHEAD_MODE
 from smartgrid.common.logging import build_log_path, setup_logger
 from smartgrid.common.utils import ensure_dir
 from smartgrid.evaluation.reporting import evaluate_forecast_frame, save_json
@@ -51,6 +52,20 @@ def resolve_bundle_dir(model_ref: str, artifacts_root: Path) -> Path:
     raise FileNotFoundError(f"Unable to resolve model ref: {model_ref}")
 
 
+def resolve_bundle_summary(bundle_dir: Path) -> dict:
+    for candidate in [bundle_dir / "run_summary.json", bundle_dir / "summary.json"]:
+        if candidate.exists():
+            return json.loads(candidate.read_text(encoding="utf-8"))
+    return {}
+
+
+def resolve_bundle_forecast_mode(bundle_dir: Path) -> str | None:
+    summary = resolve_bundle_summary(bundle_dir)
+    feature_cfg = summary.get("feature_config") or {}
+    forecast_mode = summary.get("forecast_mode") or feature_cfg.get("forecast_mode")
+    return str(forecast_mode) if forecast_mode else None
+
+
 def build_model_metadata(runtime, bundle_dir: Path) -> dict:
     summary = runtime.bundle.summary or {}
     config_path = summary.get("config_path")
@@ -63,7 +78,7 @@ def build_model_metadata(runtime, bundle_dir: Path) -> dict:
         "experiment_name": summary.get("experiment_name"),
         "dataset_key": summary.get("dataset_key"),
         "feature_config": feature_cfg,
-        "forecast_mode": feature_cfg.get("forecast_mode"),
+        "forecast_mode": summary.get("forecast_mode") or feature_cfg.get("forecast_mode"),
         "feature_columns": summary.get("feature_columns"),
         "n_features": summary.get("n_features"),
         "hidden_layers": hidden_layers,
@@ -95,10 +110,31 @@ def main() -> None:
         "end_date": args.end_date,
         "allow_fallback": bool(args.allow_fallback),
         "models": [],
+        "skipped_models": [],
     }
 
     for model_ref in args.model_refs:
         bundle_dir = resolve_bundle_dir(model_ref, artifacts_root)
+        requested_run_id = bundle_dir.name
+        forecast_mode = resolve_bundle_forecast_mode(bundle_dir)
+        if forecast_mode not in [None, STRICT_DAY_AHEAD_MODE]:
+            logger.warning(
+                "Skipping requested_model_run_id=%s bundle_dir=%s forecast_mode=%s: "
+                "replay benchmark only supports %s",
+                requested_run_id,
+                bundle_dir,
+                forecast_mode,
+                STRICT_DAY_AHEAD_MODE,
+            )
+            manifest["skipped_models"].append(
+                {
+                    "requested_model_run_id": requested_run_id,
+                    "bundle_dir": str(bundle_dir.resolve()),
+                    "forecast_mode": forecast_mode,
+                    "skip_reason": f"unsupported forecast_mode for replay benchmark: {forecast_mode}",
+                }
+            )
+            continue
         runtime = build_forecast_runtime(
             historical_csv=args.historical_csv,
             current_dir=bundle_dir,

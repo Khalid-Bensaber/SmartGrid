@@ -11,6 +11,11 @@ from sklearn.preprocessing import MinMaxScaler
 from smartgrid.common.constants import DEFAULT_TARGET_NAME
 from smartgrid.common.logging import build_log_path, setup_logger
 from smartgrid.common.paths import build_consumption_paths
+from smartgrid.common.profiling import (
+    TrainerProfiler,
+    build_environment_summary,
+    build_runtime_diagnostics,
+)
 from smartgrid.common.utils import get_device, load_yaml, parse_hidden_layers, utc_run_id
 from smartgrid.data.catalog import resolve_consumption_data_config
 from smartgrid.data.loaders import (
@@ -48,6 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weather-csv", default=None)
     parser.add_argument("--holidays-xlsx", default=None)
     parser.add_argument("--promote", action="store_true")
+    parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--device", default=None)
     return parser.parse_args()
 
 
@@ -84,8 +91,14 @@ def main() -> None:
         run_id=run_id,
     )
 
-    device = get_device(train_cfg.get("device", "auto"))
+    requested_device = args.device or train_cfg.get("device", "auto")
+    device = get_device(requested_device)
     hidden_layers = parse_hidden_layers(train_cfg["hidden_layers"])
+    runtime_diagnostics = build_runtime_diagnostics(
+        requested_device=requested_device,
+        selected_device=device,
+        profiling_enabled=args.profile,
+    )
     logger.info(
         "Starting consumption training run_id=%s config=%s device=%s "
         "dataset_key=%s forecast_mode=%s historical_csv=%s",
@@ -96,16 +109,24 @@ def main() -> None:
         feat_cfg.get("forecast_mode"),
         data_cfg.get("historical_csv"),
     )
+    logger.info("Runtime diagnostics=%s", runtime_diagnostics)
+    pipeline_timings: dict[str, float] = {}
 
+    stage_start = time.perf_counter()
     holiday_dates, special_dates = load_holiday_sets(data_cfg["holidays_xlsx"])
+    weather = load_weather_history(data_cfg.get("weather_csv"), date_col=data_cfg["date_col"])
+    pipeline_timings["holiday_weather_load_sec"] = time.perf_counter() - stage_start
+
+    stage_start = time.perf_counter()
     hist = load_history(
         data_cfg["historical_csv"],
         date_col=data_cfg["date_col"],
         target_col=target_col,
     )
-    weather = load_weather_history(data_cfg.get("weather_csv"), date_col=data_cfg["date_col"])
     hist = merge_weather_on_history(hist, weather, date_col=data_cfg["date_col"])
+    pipeline_timings["data_loading_sec"] = time.perf_counter() - stage_start
 
+    stage_start = time.perf_counter()
     feat_df, feature_cols, feature_diagnostics = build_feature_table(
         hist_df=hist,
         holiday_dates=holiday_dates,
@@ -126,6 +147,7 @@ def main() -> None:
         forecast_mode=feat_cfg.get("forecast_mode"),
         return_diagnostics=True,
     )
+    pipeline_timings["feature_engineering_sec"] = time.perf_counter() - stage_start
     timeline_summary = feature_diagnostics["timeline"]
     sample_summary = feature_diagnostics["samples"]
     logger.info(
@@ -156,6 +178,7 @@ def main() -> None:
         feature_cols,
     )
     
+    stage_start = time.perf_counter()
     train_df, val_df, test_df = make_splits(
         feat_df,
         date_col=data_cfg["date_col"],
@@ -185,7 +208,9 @@ def main() -> None:
     X_val_scaled = x_scaler.transform(X_val)
     y_val_scaled = y_scaler.transform(y_val)
     X_test_scaled = x_scaler.transform(X_test)
+    pipeline_timings["split_scaling_prep_sec"] = time.perf_counter() - stage_start
 
+    trainer_profiler = TrainerProfiler(enabled=args.profile)
     train_start = time.time()
     train_result = train_mlp_regressor(
         X_train=X_train_scaled,
@@ -205,9 +230,16 @@ def main() -> None:
         device=device,
         resume_checkpoint=args.resume_checkpoint,
         logger=logger,
+        profiler=trainer_profiler,
+        batching_strategy=train_cfg.get("batching_strategy", "auto"),
+        max_cuda_resident_bytes=int(train_cfg.get("max_cuda_resident_bytes", 512 * 1024 * 1024)),
     )
     train_duration_sec = time.time() - train_start
+    pipeline_timings["dataloader_tensor_creation_sec"] = train_result.loader_prep_sec
+    pipeline_timings["train_loop_total_sec"] = trainer_profiler.train_loop_total_sec
+    pipeline_timings["validation_total_sec"] = trainer_profiler.validation_loop_total_sec
 
+    stage_start = time.perf_counter()
     predictions = predict_model(train_result.model, train_result.test_x, y_scaler, device)
     basic_metrics = compute_basic_metrics(y_test, predictions)
 
@@ -224,6 +256,7 @@ def main() -> None:
         date_col=data_cfg["date_col"],
         target_col=target_col,
     )
+    pipeline_timings["post_train_evaluation_sec"] = time.perf_counter() - stage_start
 
     analysis_day = pick_analysis_day(backtest, benchmark, data_cfg["date_col"], args.analysis_date)
     start_day = np.datetime64(analysis_day)
@@ -240,11 +273,17 @@ def main() -> None:
     total_export = make_total_export(day_df, data_cfg["date_col"], target_col=target_col)
     total_export_path = paths.exports_dir / "total_forecast_consumption.csv"
     total_export.to_csv(total_export_path, index=False)
+    offline_total_export_path = paths.exports_dir / "offline_test_total_forecast_consumption.csv"
+    total_export.to_csv(offline_total_export_path, index=False)
 
     backtest_path = paths.exports_dir / "backtest.csv"
+    offline_backtest_path = paths.exports_dir / "offline_test_backtest.csv"
     selected_day_path = paths.exports_dir / f"selected_day_{analysis_day}.csv"
+    offline_selected_day_path = paths.exports_dir / f"offline_test_selected_day_{analysis_day}.csv"
     backtest.to_csv(backtest_path, index=False)
+    backtest.to_csv(offline_backtest_path, index=False)
     day_df.to_csv(selected_day_path, index=False)
+    day_df.to_csv(offline_selected_day_path, index=False)
     epochs_ran = len(train_result.history["train_loss"])
     best_val_loss = (
         float(min(train_result.history["val_loss"])) if train_result.history["val_loss"] else None
@@ -288,6 +327,8 @@ def main() -> None:
         "feature_missingness": feature_diagnostics["missing_feature_counts"],
         "hidden_layers": list(hidden_layers),
         "n_features": int(len(feature_cols)),
+        "batching_strategy": train_result.batching_strategy,
+        "resident_data_bytes": int(train_result.resident_data_bytes),
         "train_duration_sec": train_duration_sec,
         "epochs_ran": epochs_ran,
         "best_val_loss": best_val_loss,
@@ -295,6 +336,11 @@ def main() -> None:
         "final_val_loss": final_val_loss,
         "metrics_basic": basic_metrics,
         **evaluation,
+        "offline_test_metrics": evaluation["metrics_model"],
+        "offline_test_naive_weekly_metrics": evaluation["metrics_naive_weekly"],
+        "offline_test_old_legacy_metrics": evaluation["metrics_old_legacy"],
+        "offline_test_metrics_on_old_overlap": evaluation["metrics_model_on_old_overlap"],
+        "offline_test_comparison": evaluation["comparison"],
         "n_history_rows": int(len(hist)),
         "n_rows_before_validity_filter": int(sample_summary["rows_before_filtering"]),
         "n_total_rows": int(len(feat_df)),
@@ -314,17 +360,29 @@ def main() -> None:
         "run_dir": str(paths.run_dir.resolve()),
         "exports_dir": str(paths.exports_dir.resolve()),
         "backtest_csv": str(backtest_path.resolve()),
+        "offline_test_backtest_csv": str(offline_backtest_path.resolve()),
         "day_compare_csv": str(selected_day_path.resolve()),
+        "offline_test_selected_day_csv": str(offline_selected_day_path.resolve()),
         "output_total_csv": str(total_export_path.resolve()),
+        "offline_test_total_csv": str(offline_total_export_path.resolve()),
         "output_notebook_csv": str(notebook_export_path.resolve()),
+        "evaluation_semantics": {
+            "official_business_benchmark": "runtime_replay_forecast",
+            "offline_training_evaluation": "diagnostic_offline_test_split",
+            "legacy_backtest_csv_alias": "backtest.csv is a legacy alias for offline_test_backtest.csv",
+        },
         "export_roles": {
-            "backtest_csv": "full test-period evaluation output",
-            "day_compare_csv": "selected analysis day extracted from the backtest",
-            "output_total_csv": "compact selected-day comparison export",
+            "backtest_csv": "legacy alias of offline_test_backtest_csv",
+            "offline_test_backtest_csv": "diagnostic offline held-out evaluation output",
+            "day_compare_csv": "legacy alias of offline_test_selected_day_csv",
+            "offline_test_selected_day_csv": "selected analysis day extracted from the diagnostic offline test output",
+            "output_total_csv": "legacy alias of offline_test_total_csv",
+            "offline_test_total_csv": "compact selected-day export derived from the diagnostic offline test output",
             "output_notebook_csv": "legacy notebook compatibility export",
         },
     }
 
+    stage_start = time.perf_counter()
     train_result.model_config["feature_columns"] = feature_cols
     save_training_bundle(
         model=train_result.model,
@@ -346,6 +404,21 @@ def main() -> None:
     if args.promote:
         promote_bundle(paths.run_dir, paths.registry_current_dir)
         logger.info("Promoted run to current registry: %s", paths.registry_current_dir)
+    pipeline_timings["export_artifact_writing_sec"] = time.perf_counter() - stage_start
+    summary["environment"] = build_environment_summary(device, args.config, data_cfg)
+    summary["runtime_diagnostics"] = runtime_diagnostics
+    summary["profiling"] = {
+        "pipeline_timings_sec": pipeline_timings,
+        "trainer": trainer_profiler.to_summary(train_result.history),
+    }
+    summary["training_runtime"] = {
+        "batching_strategy": train_result.batching_strategy,
+        "resident_data_bytes": int(train_result.resident_data_bytes),
+        "configured_batching_strategy": train_cfg.get("batching_strategy", "auto"),
+        "max_cuda_resident_bytes": int(train_cfg.get("max_cuda_resident_bytes", 512 * 1024 * 1024)),
+    }
+    save_json(paths.run_dir / "run_summary.json", summary)
+    save_json(paths.exports_dir / artifacts_cfg["summary_filename"], summary)
 
     payload = {
         "run_id": run_id,
@@ -367,9 +440,15 @@ def main() -> None:
         "feature_config": feat_cfg,
         "forecast_mode": feat_cfg.get("forecast_mode"),
         "dataset_key": data_cfg.get("dataset_key"),
+        "device": str(device),
+        "runtime_diagnostics": runtime_diagnostics,
+        "batching_strategy": train_result.batching_strategy,
+        "resident_data_bytes": int(train_result.resident_data_bytes),
         "test_date_min": str(test_df[data_cfg["date_col"]].min()),
         "test_date_max": str(test_df[data_cfg["date_col"]].max()),
+        "offline_test_metrics": evaluation["metrics_model"],
         "metrics_model": evaluation["metrics_model"],
+        "profiling_enabled": bool(args.profile),
     }
     logger.info("Training run completed successfully run_id=%s", run_id)
     print(json.dumps(payload, indent=2))

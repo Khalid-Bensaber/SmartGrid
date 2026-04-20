@@ -63,6 +63,35 @@ IRRADIANCE_WEATHER_COLUMNS = [
     "Weather_Ghi90",
     "Weather_GhiMoy",
 ]
+RECENT_DYNAMICS_COLUMNS = [
+    "lag_t1",
+    "lag_t2",
+    "lag_t3",
+    "delta_t1",
+    "delta_t2",
+    "rolling_mean_6",
+    "rolling_std_6",
+]
+
+SHIFTED_RECENT_DYNAMICS_COLUMNS = [
+    "prev_day_lag_t1",
+    "prev_day_lag_t2",
+    "prev_day_lag_t3",
+    "prev_day_delta_t1",
+    "prev_day_delta_t2",
+    "prev_day_rolling_mean_6",
+    "prev_day_rolling_std_6",
+]
+
+VALIDITY_COLUMNS = [
+    "segment_id",
+    "valid_target",
+    "valid_manual_lags",
+    "valid_recent_window",
+    "valid_shifted_recent_window",
+    "valid_exogenous",
+    "valid_for_training",
+]
 
 DEFAULT_TARGET_NAME = "tot"
 DEFAULT_AIRTEMP_VALUE = 15.0

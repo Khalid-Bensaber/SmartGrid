@@ -52,11 +52,7 @@ def load_history(
     if target_col != DEFAULT_TARGET_NAME:
         df[target_col] = total_target
 
-    if "Airtemp" not in df.columns:
-        if "AirTemp" in df.columns:
-            df["Airtemp"] = df["AirTemp"]
-        else:
-            df["Airtemp"] = DEFAULT_AIRTEMP_VALUE
+    df = ensure_airtemp_column(df)
 
     df.attrs["timeline_diagnostics"] = build_timeline_diagnostics(df[date_col])
     return df
@@ -86,19 +82,44 @@ def load_weather_history(weather_csv: str | Path | None, date_col: str = "Date")
     return weather
 
 
-def merge_weather_on_history(hist: pd.DataFrame, weather: pd.DataFrame | None, date_col: str = "Date") -> pd.DataFrame:
-    if weather is None:
-        return hist
+def ensure_airtemp_column(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if "Airtemp" not in out.columns:
+        if "AirTemp" in out.columns:
+            out["Airtemp"] = out["AirTemp"]
+        else:
+            out["Airtemp"] = DEFAULT_AIRTEMP_VALUE
+    elif "AirTemp" in out.columns:
+        out["Airtemp"] = out["Airtemp"].fillna(out["AirTemp"])
 
-    merged = hist.merge(weather, on=date_col, how="left")
-    weather_cols = [c for c in merged.columns if c.startswith("Weather_")]
+    out["Airtemp"] = out["Airtemp"].fillna(DEFAULT_AIRTEMP_VALUE)
+    return out
 
+
+def _fill_weather_columns(df: pd.DataFrame, date_col: str = "Date") -> pd.DataFrame:
+    out = df.copy()
+    weather_cols = [c for c in out.columns if c.startswith("Weather_")]
     if weather_cols:
-        merged = merged.sort_values(date_col).reset_index(drop=True)
-        merged[weather_cols] = merged[weather_cols].interpolate(method="linear", limit_direction="both")
-        merged[weather_cols] = merged[weather_cols].ffill().bfill()
+        out = out.sort_values(date_col).reset_index(drop=True)
+        out[weather_cols] = out[weather_cols].interpolate(method="linear", limit_direction="both")
+        out[weather_cols] = out[weather_cols].ffill().bfill()
+    return out
 
-    return merged
+
+def attach_exogenous_columns(
+    base_df: pd.DataFrame,
+    weather: pd.DataFrame | None,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    out = ensure_airtemp_column(base_df)
+    if weather is not None:
+        out = out.merge(weather, on=date_col, how="left")
+        out = _fill_weather_columns(out, date_col=date_col)
+    return out
+
+
+def merge_weather_on_history(hist: pd.DataFrame, weather: pd.DataFrame | None, date_col: str = "Date") -> pd.DataFrame:
+    return attach_exogenous_columns(hist, weather, date_col=date_col)
 
 
 def slice_history_before_date(hist: pd.DataFrame, target_date: str, date_col: str = "Date") -> pd.DataFrame:
@@ -124,18 +145,7 @@ def build_target_day_frame(
     target_start = pd.Timestamp(target_date)
     dates = pd.date_range(target_start, periods=N_STEPS_PER_DAY, freq=FORECAST_FREQ)
     target_df = pd.DataFrame({date_col: dates})
-
-    if weather is not None:
-        weather_day = weather[weather[date_col].isin(dates)].copy()
-        weather_day = weather_day.drop_duplicates(subset=[date_col], keep="last")
-        target_df = target_df.merge(weather_day, on=date_col, how="left")
-
-    if "Weather_AirTemp" in target_df.columns:
-        target_df["Airtemp"] = target_df["Weather_AirTemp"]
-    elif "Airtemp" not in target_df.columns:
-        target_df["Airtemp"] = DEFAULT_AIRTEMP_VALUE
-
-    return target_df
+    return attach_exogenous_columns(target_df, weather, date_col=date_col)
 
 
 def load_old_benchmark(benchmark_csv: str | Path | None, date_col: str = "Date") -> pd.DataFrame | None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,10 +9,12 @@ from pathlib import Path
 import pandas as pd
 import torch
 
+import smartgrid.inference.consumption as consumption_module
 from smartgrid.common.constants import (
     DEFAULT_TARGET_NAME,
     STRICT_DAY_AHEAD_MODE,
 )
+from smartgrid.common.profiling import build_runtime_diagnostics, maybe_cuda_synchronize
 from smartgrid.common.paths import ForecastPaths, build_forecast_paths
 from smartgrid.common.utils import get_device
 from smartgrid.data.catalog import resolve_consumption_data_config
@@ -31,7 +34,6 @@ from smartgrid.features.engineering import (
     prepare_forecast_base_frame,
     resolve_weather_columns,
 )
-from smartgrid.inference.consumption import predict_from_feature_dict
 from smartgrid.registry.model_registry import (
     ConsumptionBundle,
     list_ranked_consumption_bundle_dirs,
@@ -69,6 +71,67 @@ class ReplaySummary:
     effective_model_run_ids: list[str]
     fallback_used: bool
     skipped_days: list[dict[str, str]]
+
+
+@dataclass(slots=True)
+class ForecastProfile:
+    target_date: str
+    timings_sec: dict[str, float]
+    points: int
+    model_run_id: str
+
+
+@dataclass(slots=True)
+class ReplayProfile:
+    summary: ReplaySummary
+    total_replay_sec: float
+    per_day_sec: list[dict[str, float | str]]
+
+
+def _predict_feature_rows(
+    runtime: "ForecastRuntime",
+    feature_rows: list[list[float]],
+    logger: logging.Logger | None = None,
+) -> list[float]:
+    matrix_predictor = getattr(consumption_module, "predict_from_feature_matrix", None)
+    if matrix_predictor is not None:
+        return matrix_predictor(
+            runtime.bundle.model,
+            runtime.bundle.x_scaler,
+            runtime.bundle.y_scaler,
+            feature_rows,
+            runtime.device,
+        ).tolist()
+
+    dict_predictor = getattr(consumption_module, "predict_from_feature_dict", None)
+    if dict_predictor is None:
+        raise ImportError(
+            "smartgrid.inference.consumption does not expose a compatible prediction helper. "
+            "Expected predict_from_feature_matrix or predict_from_feature_dict."
+        )
+
+    if logger is not None:
+        logger.warning(
+            "Falling back to row-by-row prediction because predict_from_feature_matrix "
+            "is not available in the currently loaded smartgrid.inference.consumption module."
+        )
+
+    predictions: list[float] = []
+    for feature_row in feature_rows:
+        feature_dict = {
+            column: value for column, value in zip(runtime.feature_columns, feature_row, strict=True)
+        }
+        predictions.append(
+            dict_predictor(
+                runtime.bundle.model,
+                runtime.bundle.x_scaler,
+                runtime.bundle.y_scaler,
+                feature_dict,
+                runtime.feature_columns,
+                runtime.device,
+            )
+        )
+    return predictions
 
 
 def infer_target_date_from_history(hist_df: pd.DataFrame, date_col: str = "Date") -> str:
@@ -219,6 +282,11 @@ def build_forecast_runtime(
     if logger is not None:
         summary = bundle.summary or {}
         timeline_diagnostics = build_timeline_diagnostics(hist_df[date_col])
+        runtime_diagnostics = build_runtime_diagnostics(
+            requested_device=device_request,
+            selected_device=device,
+            profiling_enabled=False,
+        )
         logger.info(
             "Loaded promoted model run_id=%s current_dir=%s device=%s n_features=%s",
             summary.get("run_id"),
@@ -249,6 +317,7 @@ def build_forecast_runtime(
             timeline_diagnostics["segment_count"],
             timeline_diagnostics["largest_gap_duration"],
         )
+        logger.info("Inference runtime diagnostics=%s", runtime_diagnostics)
 
     return ForecastRuntime(
         bundle=bundle,
@@ -424,10 +493,9 @@ def forecast_target_day(
         target_date,
         logger=logger,
     )
-    predictions: list[float] = []
-
     generated_at = datetime.now(timezone.utc).isoformat()
     model_run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
+    feature_rows: list[list[float]] = []
     for _, target_row in target_df.iterrows():
         feature_row = build_forecast_feature_row(
             target_row=target_row,
@@ -453,16 +521,8 @@ def forecast_target_day(
                 f"Cannot forecast {target_row[runtime.date_col]} because features "
                 f"are missing: {missing}"
             )
-
-        prediction = predict_from_feature_dict(
-            runtime.bundle.model,
-            runtime.bundle.x_scaler,
-            runtime.bundle.y_scaler,
-            feature_row,
-            runtime.feature_columns,
-            runtime.device,
-        )
-        predictions.append(prediction)
+        feature_rows.append([feature_row[column] for column in runtime.feature_columns])
+    predictions = _predict_feature_rows(runtime, feature_rows, logger=logger)
 
     forecast_df = pd.DataFrame(
         {
@@ -500,6 +560,88 @@ def forecast_next_day(
 ) -> pd.DataFrame:
     target_date = infer_target_date_from_history(runtime.historical_df, runtime.date_col)
     return forecast_target_day(runtime, target_date, logger=logger)
+
+
+def profile_forecast_target_day(
+    runtime: ForecastRuntime,
+    target_date: str,
+    logger: logging.Logger | None = None,
+) -> tuple[pd.DataFrame, ForecastProfile]:
+    timings: dict[str, float] = {}
+    target_date = str(pd.Timestamp(target_date).date())
+
+    start = time.perf_counter()
+    runtime = select_runtime_for_target_date(runtime, target_date, logger=logger)
+    timings["runtime_selection_sec"] = time.perf_counter() - start
+
+    start = time.perf_counter()
+    _, target_df, context_series, fallback_row = _build_target_feature_frame(
+        runtime,
+        target_date,
+        logger=logger,
+    )
+    timings["target_day_feature_preparation_sec"] = time.perf_counter() - start
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    model_run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
+    feature_rows: list[list[float]] = []
+    loop_start = time.perf_counter()
+    for _, target_row in target_df.iterrows():
+        feature_row = build_forecast_feature_row(
+            target_row=target_row,
+            context_series=context_series,
+            feature_columns=runtime.feature_columns,
+            include_temperature=runtime.feature_config.get("include_temperature", True),
+            include_manual_daily_lags=runtime.feature_config.get("include_manual_daily_lags", True),
+            lag_days=runtime.feature_config.get("lag_days", [7, 1, 2, 3, 4, 5, 6]),
+            include_lag_aggregates=runtime.feature_config.get("include_lag_aggregates", False),
+            include_recent_dynamics=runtime.feature_config.get("include_recent_dynamics", False),
+            include_shifted_recent_dynamics=runtime.feature_config.get(
+                "include_shifted_recent_dynamics",
+                False,
+            ),
+            include_weather=runtime.feature_config.get("include_weather", False),
+            weather_mode=runtime.feature_config.get("weather_mode"),
+            weather_columns=runtime.feature_config.get("weather_columns"),
+            fallback_row=fallback_row,
+        )
+        missing = [column for column, value in feature_row.items() if pd.isna(value)]
+        if missing:
+            raise RuntimeError(
+                f"Cannot forecast {target_row[runtime.date_col]} because features "
+                f"are missing: {missing}"
+            )
+        feature_rows.append([feature_row[column] for column in runtime.feature_columns])
+    pred_start = time.perf_counter()
+    predictions = _predict_feature_rows(runtime, feature_rows, logger=logger)
+    maybe_cuda_synchronize(runtime.device)
+    timings["model_inference_sec"] = time.perf_counter() - pred_start
+    timings["forecast_loop_sec"] = time.perf_counter() - loop_start
+
+    forecast_df = pd.DataFrame(
+        {
+            "Date": target_df[runtime.date_col],
+            "Ptot_TOTAL_Forecast": predictions,
+            "model_run_id": model_run_id,
+            "generated_at": generated_at,
+            "target_date": target_date,
+            "dataset_key": runtime.data_config.get("dataset_key"),
+            "forecast_mode": runtime.forecast_mode,
+        }
+    )
+    truth_df = extract_truth_for_day(runtime.historical_df, target_date, date_col=runtime.date_col)
+    if not truth_df.empty:
+        truth_df = truth_df[[runtime.date_col, runtime.target_col]].rename(
+            columns={runtime.date_col: "Date", runtime.target_col: "Ptot_TOTAL_Real"}
+        )
+        forecast_df = forecast_df.merge(truth_df, on="Date", how="left")
+
+    return forecast_df, ForecastProfile(
+        target_date=target_date,
+        timings_sec=timings,
+        points=int(len(forecast_df)),
+        model_run_id=model_run_id,
+    )
 
 
 def replay_forecast_period(
@@ -547,6 +689,64 @@ def replay_forecast_period(
         effective_model_run_ids=effective_model_run_ids,
         fallback_used=fallback_used,
         skipped_days=skipped_days,
+    )
+
+
+def profile_replay_forecast_period(
+    runtime: ForecastRuntime,
+    start_date: str,
+    end_date: str,
+    logger: logging.Logger | None = None,
+) -> ReplayProfile:
+    all_days = pd.date_range(start_date, end_date, freq="D")
+    per_day_sec: list[dict[str, float | str]] = []
+    replay_start = time.perf_counter()
+    day_frames: list[pd.DataFrame] = []
+    skipped_days: list[dict[str, str]] = []
+
+    for day in all_days:
+        target_date = str(day.date())
+        day_start = time.perf_counter()
+        truth_df = extract_truth_for_day(runtime.historical_df, target_date, date_col=runtime.date_col)
+        if not has_complete_day_coverage(truth_df[runtime.date_col], target_date):
+            reason = "Incomplete or missing target-day truth coverage."
+            skipped_days.append({"target_date": target_date, "reason": reason})
+            per_day_sec.append({"target_date": target_date, "elapsed_sec": time.perf_counter() - day_start, "status": "skipped"})
+            if logger is not None:
+                logger.warning("Skipping replay target_date=%s: %s", target_date, reason)
+            continue
+        try:
+            day_df, _ = profile_forecast_target_day(runtime, target_date, logger=logger)
+            day_frames.append(day_df)
+            per_day_sec.append({"target_date": target_date, "elapsed_sec": time.perf_counter() - day_start, "status": "ok"})
+        except RuntimeError as exc:
+            reason = str(exc)
+            skipped_days.append({"target_date": target_date, "reason": reason})
+            per_day_sec.append({"target_date": target_date, "elapsed_sec": time.perf_counter() - day_start, "status": "skipped"})
+            if logger is not None:
+                logger.warning("Skipping replay target_date=%s: %s", target_date, reason)
+
+    replay_df = pd.concat(day_frames, ignore_index=True) if day_frames else pd.DataFrame()
+    requested_model_run_id = (runtime.bundle.summary or {}).get("run_id", "unknown")
+    effective_model_run_ids = (
+        sorted(str(x) for x in replay_df["model_run_id"].dropna().unique().tolist())
+        if not replay_df.empty
+        else []
+    )
+    fallback_used = any(model_id != requested_model_run_id for model_id in effective_model_run_ids)
+    summary = ReplaySummary(
+        replay_df=replay_df,
+        start_date=str(pd.Timestamp(start_date).date()),
+        end_date=str(pd.Timestamp(end_date).date()),
+        requested_model_run_id=requested_model_run_id,
+        effective_model_run_ids=effective_model_run_ids,
+        fallback_used=fallback_used,
+        skipped_days=skipped_days,
+    )
+    return ReplayProfile(
+        summary=summary,
+        total_replay_sec=time.perf_counter() - replay_start,
+        per_day_sec=per_day_sec,
     )
 
 
