@@ -1,0 +1,44 @@
+experiment_name: consumption_mlp_strict_day_ahead_baseline_h256_128_do005_wd1em4
+problem: consumption
+
+data:
+  dataset_key: full_2020_2026
+  date_col: Date
+  target_name: tot
+
+split:
+  train_ratio: 0.70
+  val_ratio: 0.15
+  train_end_date: '2025-06-30'
+  val_end_date: '2025-09-30'
+
+features:
+  forecast_mode: strict_day_ahead
+  include_calendar: true
+  include_temperature: true
+  include_manual_daily_lags: true
+  include_cyclical_time: false
+  include_lag_aggregates: false
+  include_recent_dynamics: false
+  include_shifted_recent_dynamics: false
+  include_weather: false
+  lag_days: [7, 1, 2, 3, 4, 5, 6]
+
+training:
+  seed: 42
+  batch_size: 720
+  epochs: 100
+  patience: 8
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  dropout: 0.05
+  hidden_layers: [256, 128]
+  device: auto
+  num_workers: 0
+
+artifacts:
+  root_dir: artifacts
+  exports_subdir: exports/consumption
+  registry_subdir: models/consumption
+  notebook_output_filename: notebook_export_consumption.csv
+  summary_filename: run_summary.json
