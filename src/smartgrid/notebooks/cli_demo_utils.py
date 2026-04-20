@@ -13,7 +13,7 @@ import pandas as pd
 
 from smartgrid.common.constants import STRICT_DAY_AHEAD_MODE
 from smartgrid.common.utils import ensure_dir, load_yaml
-from smartgrid.evaluation.metrics import seasonal_naive_weekly
+from smartgrid.evaluation.metrics import build_metrics_df, compute_metrics_v2, seasonal_naive_weekly
 
 
 @dataclass(slots=True, frozen=True)
@@ -823,3 +823,144 @@ def build_wide_comparison_frame(
         base = base.merge(work, on="Date", how="left")
 
     return coerce_datetime(base, "Date")
+
+
+def series_columns(
+    frame: pd.DataFrame,
+    *,
+    date_col: str = "Date",
+    real_col: str = "real",
+    exclude: Sequence[str] | None = None,
+) -> list[str]:
+    excluded = {date_col, real_col, *(exclude or [])}
+    return [column for column in frame.columns if column not in excluded]
+
+
+def compute_series_metrics(
+    frame: pd.DataFrame,
+    *,
+    columns: Sequence[str] | None = None,
+    date_col: str = "Date",
+    real_col: str = "real",
+    period_label: str | None = None,
+) -> pd.DataFrame:
+    if frame.empty or real_col not in frame.columns:
+        return pd.DataFrame()
+
+    work = coerce_datetime(frame, date_col=date_col)
+    metric_columns = list(columns) if columns is not None else series_columns(
+        work,
+        date_col=date_col,
+        real_col=real_col,
+    )
+    rows: list[dict[str, Any]] = []
+
+    for column in metric_columns:
+        if column not in work.columns:
+            continue
+        valid = work[[date_col, real_col, column]].dropna().copy()
+        if valid.empty:
+            continue
+        metrics = compute_metrics_v2(
+            build_metrics_df(valid.set_index(date_col), real_col=real_col, fc_col=column)
+        )
+        row = {
+            "series": column,
+            "n_rows": int(len(valid)),
+            **metrics,
+        }
+        if period_label is not None:
+            row["period"] = period_label
+        rows.append(row)
+
+    result = pd.DataFrame(rows)
+    if not result.empty and "MAE" in result.columns:
+        result = result.sort_values("MAE").reset_index(drop=True)
+    return result
+
+
+def compute_series_daily_metrics(
+    frame: pd.DataFrame,
+    *,
+    columns: Sequence[str] | None = None,
+    date_col: str = "Date",
+    real_col: str = "real",
+    period_label: str | None = None,
+) -> pd.DataFrame:
+    if frame.empty or real_col not in frame.columns:
+        return pd.DataFrame()
+
+    work = coerce_datetime(frame, date_col=date_col)
+    work["target_date"] = work[date_col].dt.date.astype(str)
+    metric_columns = list(columns) if columns is not None else series_columns(
+        work,
+        date_col=date_col,
+        real_col=real_col,
+        exclude=["target_date"],
+    )
+    rows: list[dict[str, Any]] = []
+
+    for target_date, day_frame in work.groupby("target_date"):
+        for column in metric_columns:
+            if column not in day_frame.columns:
+                continue
+            valid = day_frame[[date_col, real_col, column]].dropna().copy()
+            if valid.empty:
+                continue
+            metrics = compute_metrics_v2(
+                build_metrics_df(valid.set_index(date_col), real_col=real_col, fc_col=column)
+            )
+            row = {
+                "target_date": target_date,
+                "series": column,
+                "n_rows": int(len(valid)),
+                **metrics,
+            }
+            if period_label is not None:
+                row["period"] = period_label
+            rows.append(row)
+
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        sort_columns = [col for col in ["target_date", "MAE"] if col in result.columns]
+        result = result.sort_values(sort_columns).reset_index(drop=True)
+    return result
+
+
+def compute_series_error_frame(
+    frame: pd.DataFrame,
+    *,
+    columns: Sequence[str] | None = None,
+    date_col: str = "Date",
+    real_col: str = "real",
+    period_label: str | None = None,
+) -> pd.DataFrame:
+    if frame.empty or real_col not in frame.columns:
+        return pd.DataFrame()
+
+    work = coerce_datetime(frame, date_col=date_col)
+    metric_columns = list(columns) if columns is not None else series_columns(
+        work,
+        date_col=date_col,
+        real_col=real_col,
+    )
+    rows: list[pd.DataFrame] = []
+
+    for column in metric_columns:
+        if column not in work.columns:
+            continue
+        valid = work[[date_col, real_col, column]].dropna().copy()
+        if valid.empty:
+            continue
+        valid = valid.rename(columns={column: "forecast", real_col: "real"})
+        valid["series"] = column
+        valid["error"] = valid["forecast"] - valid["real"]
+        valid["abs_error"] = valid["error"].abs()
+        valid["target_date"] = valid[date_col].dt.date.astype(str)
+        if period_label is not None:
+            valid["period"] = period_label
+        rows.append(valid)
+
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True)
