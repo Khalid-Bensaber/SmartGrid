@@ -9,6 +9,9 @@ import numpy as np
 import torch
 import yaml
 
+_TRAINING_FLOAT_KEYS = {"learning_rate", "weight_decay", "dropout"}
+_TRAINING_INT_KEYS = {"seed", "batch_size", "epochs", "patience", "num_workers", "max_cuda_resident_bytes"}
+
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
@@ -34,9 +37,34 @@ def get_device(requested: str) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def _coerce_config_number(value: Any, caster: type[float] | type[int]) -> Any:
+    if isinstance(value, str):
+        try:
+            return caster(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _normalize_training_config(data: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    training = data.get("training")
+    if not isinstance(training, dict):
+        return data
+    for key in _TRAINING_FLOAT_KEYS:
+        if key in training:
+            training[key] = _coerce_config_number(training[key], float)
+    for key in _TRAINING_INT_KEYS:
+        if key in training:
+            training[key] = _coerce_config_number(training[key], int)
+    return data
+
+
 def load_yaml(path: str | Path) -> dict[str, Any]:
     with Path(path).open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
+        loaded = yaml.safe_load(handle)
+    return _normalize_training_config(loaded)
 
 
 def ensure_dir(path: str | Path) -> Path:
