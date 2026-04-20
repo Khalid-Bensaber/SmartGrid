@@ -216,6 +216,38 @@ Then open:
 - `http://localhost:8000/docs`
 - `http://localhost:8000/health`
 
+Main demo routes:
+- `GET /consumption/model-info`
+- `GET /consumption/models`
+- `POST /consumption/train`
+- `POST /consumption/promote`
+- `POST /consumption/forecast/by-date`
+- `POST /consumption/replay`
+- `POST /consumption/benchmark/replay`
+- `POST /consumption/benchmark/features`
+- `GET /jobs`
+- `GET /jobs/{job_id}`
+- `GET /jobs/{job_id}/result`
+
+Example async replay call:
+
+```bash
+curl -X POST http://localhost:8000/consumption/replay/async \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date": "2026-01-01",
+    "end_date": "2026-01-15",
+    "dataset_key": "full_2020_2026",
+    "write_outputs": true
+  }'
+```
+
+Then poll the returned `job_id` with:
+
+```bash
+curl http://localhost:8000/jobs/<job_id>/result
+```
+
 ---
 
 ## 11. Notebook

@@ -42,7 +42,7 @@ from smartgrid.training.trainer import predict_model, train_mlp_regressor
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the consumption MLP pipeline")
-    parser.add_argument("--config", default="configs/consumption/mlp_baseline.yaml")
+    parser.add_argument("--config", default="configs/consumption/legacy/mlp_baseline.yaml")
     parser.add_argument("--analysis-date", default=None)
     parser.add_argument("--analysis-days", type=int, default=1)
     parser.add_argument("--resume-checkpoint", default=None)
