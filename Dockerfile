@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -22,32 +23,19 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir uv
 
-# Copy the repository content into the image.
-# In day-to-day development, docker-compose bind-mounts the repo over /workspace.
-COPY . .
-
-# Create the folders that must exist even on a fresh machine.
-RUN mkdir -p \
-    /workspace/artifacts \
-    /workspace/artifacts/runs \
-    /workspace/artifacts/exports \
-    /workspace/artifacts/models/consumption/current \
-    /workspace/artifacts/replays \
-    /workspace/artifacts/benchmarks \
-    /workspace/artifacts/logs \
-    /workspace/data/raw \
-    /workspace/data/interim \
-    /workspace/data/external
-
-# Install dependencies from the lock file when possible.
-RUN if [ -f uv.lock ]; then \
-        uv sync --all-groups --frozen; \
-    else \
-        uv sync --all-groups; \
-    fi
-
+# Only copy dependency metadata for a fast, cacheable dev image build.
+# The repository itself is mounted at runtime with .:/workspace.
+COPY pyproject.toml uv.lock README.md ./
 COPY docker/entrypoint.sh /usr/local/bin/smartgrid-entrypoint.sh
+
 RUN chmod +x /usr/local/bin/smartgrid-entrypoint.sh
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ -f uv.lock ]; then \
+        uv sync --all-groups --frozen --no-install-project; \
+    else \
+        uv sync --all-groups --no-install-project; \
+    fi
 
 ENTRYPOINT ["/usr/bin/tini", "--", "smartgrid-entrypoint.sh"]
 CMD ["bash"]

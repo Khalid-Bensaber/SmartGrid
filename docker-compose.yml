@@ -1,56 +1,33 @@
+x-smartgrid-common: &smartgrid-common
+  image: smartgrid:dev
+  working_dir: /workspace
+  environment:
+    UV_PROJECT_ENVIRONMENT: /opt/venv
+    PYTHONUNBUFFERED: "1"
+    RUN_BOOTSTRAP_CHECKS: "1"
+    RUN_BOOTSTRAP_VERIFY: "0"
+  volumes:
+    - .:/workspace
+    - smartgrid_uv_cache:/root/.cache/uv
+
 services:
   cli:
+    <<: *smartgrid-common
     build:
       context: .
       dockerfile: Dockerfile
-    image: smartgrid:dev
-    working_dir: /workspace
-    environment:
-      UV_PROJECT_ENVIRONMENT: /opt/venv
-      PYTHONUNBUFFERED: "1"
-      RUN_BOOTSTRAP_CHECKS: "1"
-      RUN_BOOTSTRAP_VERIFY: "0"
-    volumes:
-      - .:/workspace
-      - smartgrid_uv_cache:/root/.cache/uv
     stdin_open: true
     tty: true
     command: ["bash"]
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: smartgrid:dev
-    working_dir: /workspace
-    environment:
-      UV_PROJECT_ENVIRONMENT: /opt/venv
-      PYTHONUNBUFFERED: "1"
-      RUN_BOOTSTRAP_CHECKS: "1"
-      RUN_BOOTSTRAP_VERIFY: "0"
-      API_HOST: 0.0.0.0
-      API_PORT: "8000"
-    volumes:
-      - .:/workspace
-      - smartgrid_uv_cache:/root/.cache/uv
+    <<: *smartgrid-common
     ports:
       - "8000:8000"
     command: ["bash", "-lc", "make serve-api"]
 
   notebook:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: smartgrid:dev
-    working_dir: /workspace
-    environment:
-      UV_PROJECT_ENVIRONMENT: /opt/venv
-      PYTHONUNBUFFERED: "1"
-      RUN_BOOTSTRAP_CHECKS: "1"
-      RUN_BOOTSTRAP_VERIFY: "0"
-    volumes:
-      - .:/workspace
-      - smartgrid_uv_cache:/root/.cache/uv
+    <<: *smartgrid-common
     ports:
       - "8888:8888"
     command: ["bash", "-lc", "uv run jupyter lab --ip 0.0.0.0 --port 8888 --no-browser --allow-root"]

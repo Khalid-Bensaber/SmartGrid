@@ -1,113 +1,70 @@
-# SmartGrid Docker Pack
+# SmartGrid Docker Pack v3
 
-This pack is designed for the current `dev` branch workflow:
-- Python 3.12
-- `uv` as the package manager / runner
-- `make` as the main command entry point
-- processed datasets versioned in `data/processed/`
-- generated outputs written under `artifacts/`
+Cette version est pensée pour le **travail quotidien** et les **tests proches de la prod**, sans rebuild monstrueux.
 
-## What this pack does
+## Ce que cette version garantit
 
-### Dockerfile
-Builds a Linux image that already contains:
-- Python 3.12
-- `bash`
-- `build-essential`
-- `curl`
-- `git`
-- `make`
-- `tini`
-- `uv`
+- **Une seule image** est buildée : `smartgrid:dev`
+- `cli`, `api` et `notebook` **réutilisent la même image**
+- Le build reste **léger** car l'image n'embarque pas tout le repo
+- Le repo local est monté dans `/workspace` avec `.:/workspace`
+- Donc **tout ce qui est dans le repo local reste persistant entre les runs**, notamment :
+  - `artifacts/`
+  - `data/raw/`
+  - `data/interim/`
+  - `data/external/`
+  - `data/processed/` (déjà versionné dans Git)
+  - le code, configs, notebooks, scripts
+- Le cache `uv` est conservé dans un volume nommé pour accélérer les redémarrages
 
-It copies the repo into `/workspace`, creates the local runtime directories that should always exist, and runs `uv sync --all-groups` so the project is ready to use.
+## Hypothèse de fonctionnement
 
-### docker/entrypoint.sh
-Runs every time a container starts.
-It:
-1. moves into `/workspace`
-2. ensures `artifacts/`, `data/raw/`, `data/interim/`, and `data/external/` exist
-3. refreshes the environment with `uv sync`
-4. runs `make doctor` by default
-5. optionally runs `make verify`
-6. launches the final command (`bash`, `make serve-api`, etc.)
+Cette solution suppose que tu as **déjà cloné le repo sur la machine hôte** puis que tu déposes ces fichiers à la racine du repo :
 
-### docker-compose.yml
-Provides three services:
-- `cli`: interactive shell for `make` commands and scripts
-- `api`: starts the FastAPI service on port `8000`
-- `notebook`: optional JupyterLab service on port `8888`
-
-The compose file bind-mounts the whole repo into `/workspace`.
-That is the recommended default because it preserves **all local runtime outputs** in the repository folder on the host machine, including:
-- `artifacts/`
-- `data/raw/`
-- `data/interim/`
-- `data/external/`
-
-### .dockerignore
-Prevents Docker builds from sending useless or sensitive local files into the build context:
-- virtual environments
-- caches
-- ignored local data
-- generated artifacts
-- editor files
-- `.env*`
-
-It intentionally does **not** ignore `data/processed/`, because the current repo design expects those processed datasets to be available on a fresh clone.
-
-## Why the whole repo is mounted
-
-The current repo tracks the code and `data/processed/`, while generated outputs stay local.
-By mounting `.:/workspace`, you keep everything that matters on the host filesystem:
-- code changes
-- notebooks
-- processed data
-- artifacts
-- extra local data folders
-
-This is the safest and simplest setup for development and day-to-day use.
-
-## Commands
-
-### Build the image
 ```bash
-docker compose build
+git clone -b dev https://github.com/Khalid-Bensaber/SmartGrid.git
+cd SmartGrid
 ```
 
-### Open a shell in the prepared environment
+Ensuite :
+
 ```bash
+docker compose build cli --progress=plain
 docker compose run --rm cli
-```
-
-Then inside the container:
-```bash
-make doctor
-make verify
-make train-consumption
-make train-promote CONFIG=configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics.yaml ANALYSIS_DAYS=3
-make predict-next-day TARGET_DATE=2026-01-15
-make replay-period START_DATE=2026-01-01 END_DATE=2026-01-31
-```
-
-### Start the API
-```bash
 docker compose up api
-```
-
-### Start JupyterLab
-```bash
 docker compose --profile notebook up notebook
 ```
 
-## Host requirements
+## Pourquoi c'est mieux
 
-The host machine only needs a working Docker runtime able to run Linux containers.
-The host does **not** need:
-- Python
-- `uv`
-- `make`
-- `git`
-- `apt`
+L'ancienne approche rebuildait et exportait plusieurs services vers le même tag, ce qui était lent et a fini par casser.
+Ici :
 
-Those tools are installed **inside the image**.
+- `cli` est le seul service qui possède `build:`
+- `api` et `notebook` utilisent simplement `image: smartgrid:dev`
+- le Dockerfile n'utilise plus `COPY . .`
+- les dépendances sont installées séparément avec `uv sync --no-install-project`
+- le vrai repo est injecté au runtime par bind mount
+
+## Fichiers
+
+- `Dockerfile` : construit l'image de dev légère
+- `docker-compose.yml` : définit `cli`, `api`, `notebook`
+- `docker/entrypoint.sh` : prépare les dossiers runtime, resynchronise l'env et lance les checks
+- `.dockerignore` : garde le contexte de build petit
+
+## Ce qui reste persistant entre les runs
+
+Parce que le repo complet est monté avec `.:/workspace`, tout ce qui est écrit dans le repo local est conservé :
+- nouveaux artefacts de modèle
+- exports
+- benchmarks
+- logs
+- données locales
+- notebooks modifiés
+
+## Remarque importante
+
+Cette version est la **bonne version pour dev / test / pré-prod pratique**.
+
+Si plus tard tu veux une vraie image autonome de production **sans bind mount du repo**, il faudra faire un deuxième Dockerfile "prod" séparé.
