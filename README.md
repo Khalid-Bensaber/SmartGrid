@@ -752,4 +752,4 @@ curl -X POST http://localhost:8000/consumption/forecast/by-date \
 
 ## License And Ownership
 
-This repository currently carries the project metadata authored by Khalid Bensaber. Add your preferred license file and repository-level governance documents if you want to publish it as a broader open-source package.
+This project was created by Khalid Bensaber. Unless a license file is provided, no open-source license is granted.
