@@ -217,11 +217,17 @@ Current limitation:
 
 - `make test`
 - `make train-consumption CONFIG=<your-config>`
-- `make predict-next-day TARGET_DATE=2026-01-15`
+- `make predict-next-day`
 - `make replay-period START_DATE=2026-01-01 END_DATE=2026-01-31`
 
-## Read Next
+## Documentation Index
 
-- [Architecture and Code Map](ARCHITECTURE_AND_CODE_MAP.md)
-- [Data Backend Migration](DATA_BACKEND_MIGRATION.md)
-- [API and Scheduler Integration](API_AND_SCHEDULER_INTEGRATION.md)
+- [README.md](../README.md)
+- [docs/QUICKSTART.md](QUICKSTART.md)
+- [docs/OPERATIONS_AND_DEPLOYMENT.md](OPERATIONS_AND_DEPLOYMENT.md)
+- [docs/API_AND_SCHEDULER_INTEGRATION.md](API_AND_SCHEDULER_INTEGRATION.md)
+- [docs/ARCHITECTURE_AND_CODE_MAP.md](ARCHITECTURE_AND_CODE_MAP.md)
+- [docs/CUSTOMIZATION_GUIDE.md](CUSTOMIZATION_GUIDE.md)
+- [docs/DATA_BACKEND_MIGRATION.md](DATA_BACKEND_MIGRATION.md)
+- [docs/NOTEBOOK_AND_DEMO_GUIDE.md](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [MAINTAINER_GUIDE.md](../MAINTAINER_GUIDE.md)

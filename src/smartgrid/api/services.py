@@ -579,7 +579,11 @@ def run_consumption_promote(
 
 def run_consumption_training(
     *,
-    config: str = "configs/consumption/mlp_strict_day_ahead_baseline.yaml",
+    config: str = (
+        "configs/consumption/"
+        "mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_"
+        "h512_256_128_do010_wd1em5.yaml"
+    ),
     analysis_date: str | None = None,
     analysis_days: int = 1,
     resume_checkpoint: str | None = None,

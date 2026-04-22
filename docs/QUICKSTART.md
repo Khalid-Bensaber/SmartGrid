@@ -75,7 +75,7 @@ What it runs:
 
 Expected result: the repository passes dataset checks, the test suite, and the package build.
 
-## Train And Promote A Baseline Model
+## Train And Promote The Current Default Model
 
 The shortest happy path is:
 
@@ -83,11 +83,17 @@ The shortest happy path is:
 make train-promote
 ```
 
+By default, this now uses:
+
+```bash
+configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_h512_256_128_do010_wd1em5.yaml
+```
+
 If you want to be explicit about the defaults:
 
 ```bash
 make train-promote \
-  CONFIG=configs/consumption/mlp_strict_day_ahead_baseline.yaml \
+  CONFIG=configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_h512_256_128_do010_wd1em5.yaml \
   ANALYSIS_DAYS=1 \
   DATASET_KEY=full_2020_2026
 ```
@@ -101,17 +107,28 @@ Expected outputs:
 
 ## Forecast One Day
 
+Default automatic behavior:
+
+```bash
+make predict-next-day
+```
+
+This forecasts the next available day after the latest timestamp in the resolved history dataset.
+
+Explicit target-date override:
+
 ```bash
 make predict-next-day TARGET_DATE=2026-01-15
 ```
 
 Expected outputs:
 
-- `artifacts/forecasts/consumption/current/forecast_2026-01-15.csv`
-- `artifacts/forecasts/consumption/archive/<run_id>/forecast_2026-01-15.csv`
+- `artifacts/forecasts/consumption/current/forecast_<target_date>.csv`
+- `artifacts/forecasts/consumption/archive/<run_id>/forecast_<target_date>.csv`
 - a predict log under `artifacts/logs/predict/`
 
 Important: prediction loads the promoted bundle from `artifacts/models/consumption/current`.
+If the target day is a genuine future day, `Ptot_TOTAL_Real` can be absent because ground truth does not exist yet.
 
 ## Replay A Historical Period
 
@@ -179,12 +196,18 @@ Docker notes:
 - `make doctor` confirms the catalog files exist
 - `make verify` passes
 - `make train-promote` writes a new run and a current promoted bundle
-- `make predict-next-day` writes one forecast CSV for the requested day
+- `make predict-next-day` writes one forecast CSV for the inferred or explicitly requested target day
 - `make replay-period` writes replay forecasts plus metrics JSON
 - `make serve-api` exposes `/docs` without extra manual wiring
 
-## Read Next
+## Documentation Index
 
-- [Operations and Deployment](OPERATIONS_AND_DEPLOYMENT.md)
-- [Architecture and Code Map](ARCHITECTURE_AND_CODE_MAP.md)
-- [Notebook and Demo Guide](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [README.md](../README.md)
+- [docs/QUICKSTART.md](QUICKSTART.md)
+- [docs/OPERATIONS_AND_DEPLOYMENT.md](OPERATIONS_AND_DEPLOYMENT.md)
+- [docs/API_AND_SCHEDULER_INTEGRATION.md](API_AND_SCHEDULER_INTEGRATION.md)
+- [docs/ARCHITECTURE_AND_CODE_MAP.md](ARCHITECTURE_AND_CODE_MAP.md)
+- [docs/CUSTOMIZATION_GUIDE.md](CUSTOMIZATION_GUIDE.md)
+- [docs/DATA_BACKEND_MIGRATION.md](DATA_BACKEND_MIGRATION.md)
+- [docs/NOTEBOOK_AND_DEMO_GUIDE.md](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [MAINTAINER_GUIDE.md](../MAINTAINER_GUIDE.md)

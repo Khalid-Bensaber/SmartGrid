@@ -17,6 +17,12 @@ The FastAPI layer lets an external system trigger the same project capabilities 
 
 This is useful for schedulers, demo dashboards, or automation agents that should not shell directly into the repository.
 
+When `POST /consumption/train` is called without a `config` override, the API now defaults to:
+
+```bash
+configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_h512_256_128_do010_wd1em5.yaml
+```
+
 ## Route Categories
 
 ### Health And Jobs
@@ -106,6 +112,13 @@ Important response fields:
 - `requested_model_run_id`
 - `fallback_used`
 - output CSV paths when `write_outputs=true`
+
+Forecast semantics:
+
+- `/consumption/forecast/next-day` infers the next available day after the latest timestamp in history
+- `/consumption/forecast/by-date` uses the explicit `target_date` you provide
+- if the target day is in the future, `Ptot_TOTAL_Real` may be `null` because real target values do not exist yet
+- immediate runtime metrics are not available for such true future days; use replay or evaluate later when truth arrives
 
 ## Typical Replay Payload
 
@@ -210,6 +223,8 @@ If you need durable orchestration later, keep the HTTP contracts and replace the
 - The API guards access to the promoted `current` bundle with in-process locks. That protects concurrent reads and promotions inside one process only.
 - The same strict day-ahead semantics as the CLI apply here. Replay remains the official runtime benchmark.
 - Most request models accept dataset overrides such as `dataset_key`, `historical_csv`, `weather_csv`, and `holidays_xlsx`. Use those only when you truly need to bypass the default catalog resolution.
+- The current default model requires exact daily lag timestamps and target-day exogenous inputs. The runtime does not silently replace missing exact lags with approximate “latest available” values.
+- If required features are missing for the requested bundle and date, forecasting fails cleanly unless fallback selection is enabled and a compatible fallback bundle is found.
 
 ## When To Prefer The CLI Instead
 
@@ -226,7 +241,14 @@ Use the API when:
 - you need polling semantics
 - you want to decouple the scheduler from direct shell access
 
-## Read Next
+## Documentation Index
 
-- [Operations and Deployment](OPERATIONS_AND_DEPLOYMENT.md)
-- [Maintainer Guide](../MAINTAINER_GUIDE.md)
+- [README.md](../README.md)
+- [docs/QUICKSTART.md](QUICKSTART.md)
+- [docs/OPERATIONS_AND_DEPLOYMENT.md](OPERATIONS_AND_DEPLOYMENT.md)
+- [docs/API_AND_SCHEDULER_INTEGRATION.md](API_AND_SCHEDULER_INTEGRATION.md)
+- [docs/ARCHITECTURE_AND_CODE_MAP.md](ARCHITECTURE_AND_CODE_MAP.md)
+- [docs/CUSTOMIZATION_GUIDE.md](CUSTOMIZATION_GUIDE.md)
+- [docs/DATA_BACKEND_MIGRATION.md](DATA_BACKEND_MIGRATION.md)
+- [docs/NOTEBOOK_AND_DEMO_GUIDE.md](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [MAINTAINER_GUIDE.md](../MAINTAINER_GUIDE.md)

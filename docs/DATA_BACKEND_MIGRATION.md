@@ -160,3 +160,15 @@ Useful existing regression anchors:
 The migration target is not “teach every module about Cassandra.”
 
 The migration target is “replace storage access while preserving SmartGrid’s current dataframe contract and strict day-ahead semantics.”
+
+## Documentation Index
+
+- [README.md](../README.md)
+- [docs/QUICKSTART.md](QUICKSTART.md)
+- [docs/OPERATIONS_AND_DEPLOYMENT.md](OPERATIONS_AND_DEPLOYMENT.md)
+- [docs/API_AND_SCHEDULER_INTEGRATION.md](API_AND_SCHEDULER_INTEGRATION.md)
+- [docs/ARCHITECTURE_AND_CODE_MAP.md](ARCHITECTURE_AND_CODE_MAP.md)
+- [docs/CUSTOMIZATION_GUIDE.md](CUSTOMIZATION_GUIDE.md)
+- [docs/DATA_BACKEND_MIGRATION.md](DATA_BACKEND_MIGRATION.md)
+- [docs/NOTEBOOK_AND_DEMO_GUIDE.md](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [MAINTAINER_GUIDE.md](../MAINTAINER_GUIDE.md)

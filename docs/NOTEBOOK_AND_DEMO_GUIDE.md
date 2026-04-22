@@ -60,6 +60,7 @@ Useful commands:
 
 ```bash
 make train-promote
+make predict-next-day
 make replay-period START_DATE=2025-11-20 END_DATE=2026-03-19
 uv run python scripts/generate_cli_demo_notebook_v4.py
 ```
@@ -76,7 +77,7 @@ Safe and fast:
 
 - open the README and explain the project scope
 - run `make doctor`
-- run `make predict-next-day TARGET_DATE=2026-01-15`
+- run `make predict-next-day`
 - open `http://localhost:8000/docs` after `make serve-api`
 - show replay outputs that were computed ahead of time
 - walk through the V4 notebook with cached exports already present
@@ -130,7 +131,14 @@ That separation matters during handoff:
 - depending on async API jobs if the API process might restart
 - using older notebooks as if they described the current pipeline
 
-## Read Next
+## Documentation Index
 
-- [Quick Start](QUICKSTART.md)
-- [Operations and Deployment](OPERATIONS_AND_DEPLOYMENT.md)
+- [README.md](../README.md)
+- [docs/QUICKSTART.md](QUICKSTART.md)
+- [docs/OPERATIONS_AND_DEPLOYMENT.md](OPERATIONS_AND_DEPLOYMENT.md)
+- [docs/API_AND_SCHEDULER_INTEGRATION.md](API_AND_SCHEDULER_INTEGRATION.md)
+- [docs/ARCHITECTURE_AND_CODE_MAP.md](ARCHITECTURE_AND_CODE_MAP.md)
+- [docs/CUSTOMIZATION_GUIDE.md](CUSTOMIZATION_GUIDE.md)
+- [docs/DATA_BACKEND_MIGRATION.md](DATA_BACKEND_MIGRATION.md)
+- [docs/NOTEBOOK_AND_DEMO_GUIDE.md](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [MAINTAINER_GUIDE.md](../MAINTAINER_GUIDE.md)

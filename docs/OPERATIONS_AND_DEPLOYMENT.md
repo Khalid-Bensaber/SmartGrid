@@ -15,6 +15,62 @@ SmartGrid can be used in four aligned ways:
 
 All of these surfaces target the same consumption pipeline and the same promoted bundle convention.
 
+## Current Default Production-Style Model
+
+The current default training config is:
+
+```bash
+configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_h512_256_128_do010_wd1em5.yaml
+```
+
+Exact current model details:
+
+- Forecast mode: `strict_day_ahead`
+- Target: `tot`
+- Dataset key: `full_2020_2026`
+- Split dates: `train_end_date=2025-06-30`, `val_end_date=2025-09-30`
+- Hidden layers: `[512, 256, 128]`
+- Dropout: `0.10`
+- Weight decay: `0.00001`
+- Lag days: `[7, 1, 2, 3, 4, 5, 6]`
+
+Enabled feature families:
+
+- calendar features
+- temperature
+- manual daily lags
+- cyclical time
+- lag aggregates
+- shifted recent dynamics
+- weather in `basic` mode
+
+Disabled in this default model:
+
+- same-day recent dynamics
+
+`basic` weather mode means the runtime expects the weather CSV to provide timestamp-aligned values that become `Weather_AirTemp` and `Weather_CloudOpacity` after loading and renaming.
+
+Required files in practice:
+
+- historical consumption CSV: `data/processed/conso/Consumption data 2020-2026.csv`
+- weather CSV: `data/processed/Weather data 2020-2026.csv`
+- holidays workbook: `data/processed/Holidays.xlsx`
+- promoted bundle for inference: `artifacts/models/consumption/current/`
+
+The legacy or benchmark forecast CSV is useful for some offline comparisons, but it is not required to run day-ahead inference from the current promoted model.
+
+Minimum historical context:
+
+- at least seven contiguous days of `10min` history immediately before the target day
+
+That minimum comes from the exact `lag_d7` lookups plus the shifted recent-dynamics window taken from the previous day. If those exact timestamps are not present, the runtime does not approximate them with “the latest seven available days”.
+
+Operational meaning of `strict_day_ahead`:
+
+- target-day features are built only from pre-target history plus target-day exogenous inputs
+- same-day target observations are not allowed
+- replay uses that same runtime logic day by day to evaluate realistic operational behavior
+
 ## Docker Files And Compose Layout
 
 Relevant files:
@@ -82,10 +138,10 @@ Use the GPU override only on machines with an NVIDIA runtime. The main Compose f
 ### Runtime Operations
 
 - `make serve-api`: runs `uv run uvicorn smartgrid.api:app --reload --host 0.0.0.0 --port 8000`
-- `make train-consumption`: runs `scripts/train_consumption.py` with the configured YAML, dataset key, and analysis window
+- `make train-consumption`: runs `scripts/train_consumption.py` with the configured YAML, dataset key, and analysis window; the default `CONFIG` now points to the current best strict day-ahead model
 - `make train-promote`: same as training, but adds `--promote` so the new bundle becomes current immediately
 - `make promote-consumption RUN_ID=...`: copies an existing run bundle into `artifacts/models/consumption/current`
-- `make predict-next-day`: runs day-ahead forecasting from the promoted bundle
+- `make predict-next-day`: runs day-ahead forecasting from the promoted bundle; without `TARGET_DATE`, it infers the next available day after the latest history timestamp
 - `make replay-period`: replays one historical interval day by day and evaluates forecast quality where truth exists
 - `make benchmark-features`: trains several configs and ranks them by replay results
 - `make benchmark-replay MODEL_REFS='run_a run_b'`: benchmarks existing runs on the same replay period
@@ -96,7 +152,7 @@ Use the GPU override only on machines with an NVIDIA runtime. The main Compose f
 - `make train-consumption` -> `uv run python scripts/train_consumption.py --config "$CONFIG" --analysis-days "$ANALYSIS_DAYS" --dataset-key "$DATASET_KEY"`
 - `make train-promote` -> `uv run python scripts/train_consumption.py --config "$CONFIG" --analysis-days "$ANALYSIS_DAYS" --dataset-key "$DATASET_KEY" --promote`
 - `make promote-consumption RUN_ID=...` -> `uv run python scripts/promote_consumption_run.py --run-id "$RUN_ID"`
-- `make predict-next-day` -> `uv run python scripts/predict_next_day.py --dataset-key "$DATASET_KEY" --historical-csv "$HISTORICAL_CSV" --weather-csv "$WEATHER_CSV" --holidays-xlsx "$HOLIDAYS_XLSX" --target-date "$TARGET_DATE"`
+- `make predict-next-day` -> `uv run python scripts/predict_next_day.py --dataset-key "$DATASET_KEY" --historical-csv "$HISTORICAL_CSV" --weather-csv "$WEATHER_CSV" --holidays-xlsx "$HOLIDAYS_XLSX" [--target-date "$TARGET_DATE"]`
 - `make replay-period` -> `uv run python scripts/replay_period.py --dataset-key "$DATASET_KEY" --historical-csv "$HISTORICAL_CSV" --weather-csv "$WEATHER_CSV" --holidays-xlsx "$HOLIDAYS_XLSX" --start-date "$START_DATE" --end-date "$END_DATE"`
 - `make serve-api` -> `uv run uvicorn smartgrid.api:app --reload --host "$API_HOST" --port "$API_PORT"`
 - `make benchmark-features` -> `uv run python scripts/benchmark_feature_variants.py ...`
@@ -112,6 +168,31 @@ Use the GPU override only on machines with an NVIDIA runtime. The main Compose f
 6. Expose or integrate the workflow through `make serve-api` when needed.
 
 If you want comparative evaluation rather than a single promoted model check, use `make benchmark-features` or `make benchmark-replay`.
+
+## Next-Day And Future-Date Semantics
+
+`next-day` means the next calendar day after the latest timestamp found in the resolved historical dataset.
+
+Current behavior by surface:
+
+- `make predict-next-day`: automatic when `TARGET_DATE` is omitted; explicit when `TARGET_DATE=YYYY-MM-DD` is provided
+- `scripts/predict_next_day.py`: automatic when `--target-date` is omitted; explicit when it is provided
+- `POST /consumption/forecast/next-day`: always automatic
+- `POST /consumption/forecast/by-date`: always explicit
+
+For a genuine future target day:
+
+- forecast generation still works if the required features can be built
+- `Ptot_TOTAL_Real` may be absent because true target values do not exist yet
+- immediate runtime metrics are therefore unavailable for that future day
+- operational evaluation should happen later when truth arrives, or through historical replay on past periods
+
+For a distant future target day:
+
+- the runtime uses exact timestamp lag lookups
+- it does not silently replace missing exact daily lags with approximate “latest available” substitutes
+- if required lags or exogenous values are missing, forecasting fails cleanly
+- if `allow_fallback` is enabled, the runtime may search for a compatible fallback bundle instead of the requested current bundle
 
 ## Artifacts And Logs
 
@@ -139,7 +220,7 @@ Generated outputs live under `artifacts/`.
   This is expected when target-day truth coverage is incomplete. The replay metrics JSON records skipped dates and reasons.
 
 - Forecasting fails with missing features:
-  The promoted bundle may require lag or exogenous values that are unavailable for the requested date. Check the log and consider retraining or using a compatible fallback bundle.
+  The promoted bundle may require exact lag or exogenous values that are unavailable for the requested date. The runtime does not approximate missing exact daily lags. Check the log and consider retraining or using a compatible fallback bundle.
 
 - API async jobs disappear after a restart:
   The job manager stores state in memory only. Restarting the API loses queued and completed job state.
@@ -156,8 +237,14 @@ Generated outputs live under `artifacts/`.
 - The repo intentionally versions processed demo data under `data/processed/`. Do not hide that directory behind a separate Docker volume.
 - The active production-style workflow is consumption forecasting. PV assets exist, but the API and CLI are not yet parallelized into a production pipeline.
 
-## Read Next
+## Documentation Index
 
-- [Quick Start](QUICKSTART.md)
-- [API and Scheduler Integration](API_AND_SCHEDULER_INTEGRATION.md)
-- [Notebook and Demo Guide](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [README.md](../README.md)
+- [docs/QUICKSTART.md](QUICKSTART.md)
+- [docs/OPERATIONS_AND_DEPLOYMENT.md](OPERATIONS_AND_DEPLOYMENT.md)
+- [docs/API_AND_SCHEDULER_INTEGRATION.md](API_AND_SCHEDULER_INTEGRATION.md)
+- [docs/ARCHITECTURE_AND_CODE_MAP.md](ARCHITECTURE_AND_CODE_MAP.md)
+- [docs/CUSTOMIZATION_GUIDE.md](CUSTOMIZATION_GUIDE.md)
+- [docs/DATA_BACKEND_MIGRATION.md](DATA_BACKEND_MIGRATION.md)
+- [docs/NOTEBOOK_AND_DEMO_GUIDE.md](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [MAINTAINER_GUIDE.md](../MAINTAINER_GUIDE.md)

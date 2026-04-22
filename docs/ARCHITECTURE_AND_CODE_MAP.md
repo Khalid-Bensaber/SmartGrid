@@ -179,6 +179,36 @@ Defines:
 - `training`: seed, batch size, optimizer parameters, hidden layers, device
 - `artifacts`: where to write runs, exports, and registry bundles
 
+## Current Default Config In The Codebase
+
+The current default training config used by the Makefile, CLI training entry point, and API training schema/service is:
+
+```bash
+configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_h512_256_128_do010_wd1em5.yaml
+```
+
+Architecturally, that default means the active production-style path is:
+
+- target `tot`
+- dataset key `full_2020_2026`
+- forecast mode `strict_day_ahead`
+- train/validation cutoffs `2025-06-30` and `2025-09-30`
+- hidden layers `[512, 256, 128]`
+- dropout `0.10`
+- weight decay `0.00001`
+- features from calendar terms, temperature, exact daily lags, cyclical time, lag aggregates, shifted recent dynamics, and `basic` weather inputs
+
+`basic` weather mode maps to `Weather_AirTemp` and `Weather_CloudOpacity` after the weather CSV is loaded and renamed.
+
+The runtime inputs needed to execute that model are:
+
+- historical consumption CSV
+- weather CSV
+- holidays workbook
+- promoted bundle under `artifacts/models/consumption/current/`
+
+The minimal history requirement is seven contiguous days of `10min` data immediately before the target day because the model depends on exact `lag_d7` timestamps and shifted previous-day windows.
+
 ## Data Flow In Practice
 
 ### Training Flow
@@ -231,8 +261,14 @@ Defines:
 - Change API business logic -> `src/smartgrid/api/services.py`
 - Change notebook orchestration -> `scripts/generate_cli_demo_notebook_v4.py` and `src/smartgrid/notebooks/cli_demo_utils.py`
 
-## Read Next
+## Documentation Index
 
-- [Maintainer Guide](../MAINTAINER_GUIDE.md)
-- [Customization Guide](CUSTOMIZATION_GUIDE.md)
-- [Data Backend Migration](DATA_BACKEND_MIGRATION.md)
+- [README.md](../README.md)
+- [docs/QUICKSTART.md](QUICKSTART.md)
+- [docs/OPERATIONS_AND_DEPLOYMENT.md](OPERATIONS_AND_DEPLOYMENT.md)
+- [docs/API_AND_SCHEDULER_INTEGRATION.md](API_AND_SCHEDULER_INTEGRATION.md)
+- [docs/ARCHITECTURE_AND_CODE_MAP.md](ARCHITECTURE_AND_CODE_MAP.md)
+- [docs/CUSTOMIZATION_GUIDE.md](CUSTOMIZATION_GUIDE.md)
+- [docs/DATA_BACKEND_MIGRATION.md](DATA_BACKEND_MIGRATION.md)
+- [docs/NOTEBOOK_AND_DEMO_GUIDE.md](NOTEBOOK_AND_DEMO_GUIDE.md)
+- [MAINTAINER_GUIDE.md](../MAINTAINER_GUIDE.md)

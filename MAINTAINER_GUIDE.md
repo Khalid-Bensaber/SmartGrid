@@ -11,6 +11,14 @@ For deeper explanations, use the companion guides in `docs/`.
 - Official operational evaluation path: `scripts/replay_period.py` -> `src/smartgrid/cli/replay_period.py`
 - HTTP orchestration layer: `src/smartgrid/api/`
 
+## Active Default Config
+
+The current default training config wired into the Makefile, CLI, and API is:
+
+```bash
+configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_h512_256_128_do010_wd1em5.yaml
+```
+
 ## Where To Change Data Sources
 
 - Dataset keys and file paths: `configs/common/data_sources.yaml`
@@ -87,14 +95,18 @@ The notebook should stay CLI-first: it should orchestrate repo code, not reimple
 
 - `make doctor`
 - `make test`
-- `make train-consumption CONFIG=configs/consumption/mlp_strict_day_ahead_baseline.yaml`
-- `make predict-next-day TARGET_DATE=2026-01-15`
+- `make train-consumption CONFIG=configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_h512_256_128_do010_wd1em5.yaml`
+- `make predict-next-day`
 - `make replay-period START_DATE=2026-01-01 END_DATE=2026-01-31`
 
-## Read Next
+## Documentation Index
 
-- [Architecture and Code Map](docs/ARCHITECTURE_AND_CODE_MAP.md)
-- [Customization Guide](docs/CUSTOMIZATION_GUIDE.md)
-- [Operations and Deployment](docs/OPERATIONS_AND_DEPLOYMENT.md)
-- [API and Scheduler Integration](docs/API_AND_SCHEDULER_INTEGRATION.md)
-- [Data Backend Migration](docs/DATA_BACKEND_MIGRATION.md)
+- [README.md](README.md)
+- [docs/QUICKSTART.md](docs/QUICKSTART.md)
+- [docs/OPERATIONS_AND_DEPLOYMENT.md](docs/OPERATIONS_AND_DEPLOYMENT.md)
+- [docs/API_AND_SCHEDULER_INTEGRATION.md](docs/API_AND_SCHEDULER_INTEGRATION.md)
+- [docs/ARCHITECTURE_AND_CODE_MAP.md](docs/ARCHITECTURE_AND_CODE_MAP.md)
+- [docs/CUSTOMIZATION_GUIDE.md](docs/CUSTOMIZATION_GUIDE.md)
+- [docs/DATA_BACKEND_MIGRATION.md](docs/DATA_BACKEND_MIGRATION.md)
+- [docs/NOTEBOOK_AND_DEMO_GUIDE.md](docs/NOTEBOOK_AND_DEMO_GUIDE.md)
+- [MAINTAINER_GUIDE.md](MAINTAINER_GUIDE.md)
