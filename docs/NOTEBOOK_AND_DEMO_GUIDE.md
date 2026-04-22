@@ -35,13 +35,21 @@ Manual or historical notebooks:
 - older `SmartGrid_CLI_Demo_Notebook*.ipynb` files
 - `SmartGrid_Demo_Globale*.ipynb`
 - exploratory analysis notebooks such as `SmartGrid_Replay_Benchmark_Analyse.ipynb` and `compare_consumption_feature_variants.ipynb`
+- research notebooks under `notebooks/research/`, especially `01_Analyse_de_Modele.ipynb`
 
 Rule of thumb:
 
 - use V4 for the official demo story
 - treat older notebooks as historical analysis material, not operational truth
 
-## What To Precompute Before The Oral Demo
+Note on the research benchmark notebook:
+
+- `notebooks/research/01_Analyse_de_Modele.ipynb` is a research notebook used to benchmark the first-generation model against a simple naive baseline.
+- Its purpose is analytical: check whether the early model adds value beyond a basic reference forecast, inspect error patterns, and support model-critique work.
+- It should be read as historical research context, not as the definition of the current production-style pipeline, current best model, or official replay process.
+- For handoff and demo purposes, use it only to explain the project’s early benchmarking logic, then return to the V4 demo notebook and replay outputs for the current operational story.
+
+## What To Do
 
 Minimum recommended preparation:
 
