@@ -43,19 +43,17 @@ The repo is intended to be used in several aligned ways:
 - Exposes training, promotion, forecast, replay, and benchmarking through FastAPI
 - Supports local `make` workflows, direct CLI usage, notebooks, and Docker
 
-## Quick Start
+## Quick Start Without Docker
 
 ```bash
-git clone <repository-url> SmartGrid
+git clone <repository-url> 
 cd SmartGrid
-git checkout dev
-make install
-make doctor
-make verify
-make train-promote
-make predict-next-day
-make replay-period START_DATE=2026-01-01 END_DATE=2026-01-31
-make serve-api
+make install 
+make doctor 
+make verify 
+make train-promote 
+make predict-next-day 
+make serve-api 
 ```
 
 After `make serve-api`, open `http://localhost:8000/docs`.
@@ -65,10 +63,10 @@ After `make serve-api`, open `http://localhost:8000/docs`.
 - `make install`: install all dependency groups with `uv`
 - `make doctor`: verify the tracked dataset files referenced by the catalog
 - `make verify`: run setup checks, tests, and a package build
-- `make train-promote`: train and immediately promote the new run
-- `make promote-consumption RUN_ID=...`: promote an existing run manually
+- `make train-promote`: train and immediately promote the model
+- `make promote-consumption RUN_ID=...`: promote an existing run manually (Useful to change model)
 - `make predict-next-day`: forecast the next available day after the latest history timestamp, or pass `TARGET_DATE=YYYY-MM-DD` to force a specific day
-- `make replay-period START_DATE=... END_DATE=...`: run official historical replay
+- `make replay-period START_DATE=... END_DATE=...`: run official historical replay, usefull to see how the models performs on known dataS
 - `make serve-api`: start the FastAPI server on `0.0.0.0:8000`
 - `make benchmark-features`: train several configs and rank them on replay
 - `make benchmark-replay MODEL_REFS='run_a run_b'`: compare existing runs on one replay window
@@ -77,7 +75,7 @@ After `make serve-api`, open `http://localhost:8000/docs`.
 
 - `strict_day_ahead` is the explicit operational forecasting mode. Same-day target leakage must not be reintroduced.
 - Historical `replay` is the official operational evaluation path. Offline train/test metrics remain useful, but they are secondary diagnostics.
-- The promoted bundle under `artifacts/models/consumption/current` is the default runtime entry point for CLI and API forecasting.
+- The promoted bundle under `artifacts/models/consumption/current` is the default runtime entry point for CLI and API forecasting. This is were the current model is located.
 - `make predict-next-day` is automatic by default: if `TARGET_DATE` is omitted, the runtime forecasts the next available day after the latest timestamp in history.
 - A genuine future-date forecast can return `Ptot_TOTAL_Real = null` because no ground truth exists yet. Immediate runtime metrics are therefore unavailable for true future days; use historical replay or evaluate later when truth arrives.
 - Processed demo datasets are versioned under `data/processed/`; generated outputs and logs go under `artifacts/`.
@@ -85,12 +83,29 @@ After `make serve-api`, open `http://localhost:8000/docs`.
 
 ## Repository At A Glance
 
-- `configs/`: dataset catalog and experiment YAML files
-- `scripts/`: operator-facing entry scripts
-- `src/smartgrid/`: application code for data, features, training, inference, registry, API, and notebook helpers
-- `tests/`: regression coverage for temporal semantics, features, catalog resolution, and API contracts
-- `notebooks/`: demo and research notebooks
-- `docs/`: handoff, operations, architecture, and integration documentation
+- `configs/`: configuration layer.
+  `configs/common/data_sources.yaml` is the dataset catalog, and `configs/consumption/*.yaml` defines the active training experiments, split dates, feature flags, and training hyperparameters.
+- `data/`: project inputs.
+  `data/processed/` contains the tracked processed consumption, weather, and holiday files used by the documented pipeline. `data/raw/`, `data/interim/`, and `data/external/` are reserved for local or future data workflows.
+- `scripts/`: operator-facing entry scripts.
+  This is the main execution surface for training, promotion, forecasting, replay, benchmarks, and setup checks.
+- `src/smartgrid/`: application code.
+  This package contains the real implementation for catalog resolution, loaders, feature engineering, model definition, training, inference, replay, evaluation, registry loading, API services, and notebook helpers.
+- `src/Legacy/`: historical reference code.
+  Useful for context, but not the path to extend for the current modular consumption pipeline.
+- `artifacts/`: generated outputs and runtime state.
+  `artifacts/runs/consumption/` stores persisted bundles for each training run, `artifacts/exports/consumption/` stores summaries and offline diagnostic exports, `artifacts/models/consumption/current/` stores the promoted bundle used by default at inference time, `artifacts/forecasts/` stores forecast CSV outputs, `artifacts/replays/` stores replay outputs and metrics, `artifacts/benchmarks/` stores multi-run comparison outputs, `artifacts/notebook_exports/` stores presentation exports, and `artifacts/logs/` stores train, predict, and replay logs.
+- `tests/`: regression coverage.
+  These tests protect temporal semantics, feature parity, dataset catalog resolution, evaluation logic, and API contracts.
+- `notebooks/`: demo and research layer.
+  The authoritative handoff/demo notebook is the V4 CLI demo notebook, while the other notebooks preserve analysis and historical experimentation context.
+- `docker/` and Compose files: container runtime support.
+  `Dockerfile`, `docker-compose.yml`, `docker-compose.gpu.yml`, and `docker/entrypoint.sh` provide the reproducible CLI, API, and notebook environment.
+- `docs/`: handoff documentation.
+  This is the maintained documentation layer for quick start, operations, API integration, architecture, customization, migration planning, and demo guidance.
+
+Typical project path through the repository:
+`configs/` + `data/processed/` -> `scripts/` / `src/smartgrid/` -> `artifacts/runs/` -> `artifacts/models/consumption/current/` -> `artifacts/forecasts/` or `artifacts/replays/`.
 
 ## Historical Material
 

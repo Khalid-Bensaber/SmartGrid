@@ -90,6 +90,7 @@ Key behavior:
 - The entrypoint creates runtime directories, runs `uv sync`, and executes `make doctor`
 
 The Docker setup is intentionally development-oriented. It is designed to preserve local edits, local artifacts, and tracked processed data through the bind mount.
+Running the build command will build the environment ready to be used. The first build can take some time but the next builds will be way faster
 
 ## CPU Vs GPU Paths
 
@@ -101,18 +102,18 @@ The Docker setup is intentionally development-oriented. It is designed to preser
 
 ### Docker Execution
 
-CPU or non-GPU host:
+To run on aCPU or non-GPU host:
 
 ```bash
-docker compose build cli --progress=plain
+docker compose build cli 
 docker compose run --rm cli
 docker compose up api
 ```
 
-GPU host:
+If you have a GPU host:
 
 ```bash
-docker compose build cli --progress=plain
+docker compose build cli
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm cli
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up api
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile notebook up notebook

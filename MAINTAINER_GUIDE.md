@@ -36,11 +36,30 @@ Use the catalog as the first place to add or swap tracked datasets. Only change 
 
 The current implementation supports ratio-based splits or date-based `train_end_date` / `val_end_date`. Date-only boundaries include the full day.
 
+In plain terms:
+
+- `train`: the older historical window the model learns from
+- `validation`: the next held-out window used during training to monitor generalization and support choices like early stopping
+- `test`: the later held-out window used for offline evaluation after training
+
+In SmartGrid, these are chronological time windows, not random shuffled samples. Replay remains the official operational evaluation path beyond this offline split.
+
 ## Where To Change Features
 
 - Feature flags and feature construction: `src/smartgrid/features/engineering.py`
 - Weather and validity column constants: `src/smartgrid/common/constants.py`
 - Training/inference parity tests: `tests/test_day_ahead.py`, `tests/test_features.py`, `tests/test_temporal_semantics.py`
+
+How `src/smartgrid/features/engineering.py` works at a high level:
+
+- `normalize_feature_config(...)` is the first gate. It fills defaults, resolves the forecast mode, and rejects invalid combinations such as same-day `include_recent_dynamics` under `strict_day_ahead`.
+- `build_feature_table(...)` is the main training-time entry point. It takes the loaded historical dataframe and adds the enabled feature families row by row across the whole history.
+- Calendar and cyclical features come from timestamp-derived columns such as weekday, holiday flags, and sine/cosine time encodings.
+- Temporal features come from exact timestamp lookups, not loose approximations. Daily lags like `lag_d7` must exist at the exact matching timestamp, and shifted recent-dynamics features come from the previous day's recent window.
+- Weather features are only added when enabled, and the selected weather columns are resolved from the configured weather mode.
+- The file also computes validity columns such as `valid_manual_lags`, `valid_exogenous`, and `valid_for_training`. These decide which rows are safe to keep for training and which rows must be dropped because a required feature block is incomplete.
+- `prepare_forecast_base_frame(...)` builds the target-day base rows used at inference time for timestamp-derived features such as calendar or cyclical terms.
+- `build_forecast_feature_row(...)` is the forecast-time mirror of training-time feature creation. It reconstructs one target timestamp's feature vector from pre-target history plus target-day exogenous inputs.
 
 If you add a feature, update both training-time feature generation and forecast-time feature reconstruction. Strict day-ahead mode must keep rejecting features that require same-day target truth.
 
