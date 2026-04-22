@@ -8,9 +8,9 @@ UV ?= uv
 PYTHON ?= python
 RUN = $(UV) run $(PYTHON)
 
-CONFIG ?= configs/consumption/mlp_strict_day_ahead_baseline.yaml
+CONFIG ?= configs/consumption/mlp_strict_day_ahead_cyclical_weather_shifted_dynamics_h512_256_128_do010_wd1em5.yaml
 ANALYSIS_DAYS ?= 1
-TARGET_DATE ?= 2026-01-15
+TARGET_DATE ?=
 START_DATE ?= 2026-01-01
 END_DATE ?= 2026-01-31
 RUN_ID ?=
@@ -47,7 +47,7 @@ help:
 	@echo "  make train-consumption       Train with CONFIG=<yaml>"
 	@echo "  make train-promote           Train and immediately promote the run"
 	@echo "  make promote-consumption     Promote RUN_ID=<consumption_mlp_...>"
-	@echo "  make predict-next-day        Forecast TARGET_DATE=<YYYY-MM-DD>"
+	@echo "  make predict-next-day        Forecast the next available day or TARGET_DATE=<YYYY-MM-DD>"
 	@echo "  make replay-period           Replay START_DATE=<...> END_DATE=<...>"
 	@echo "  make benchmark-features      Compare BENCHMARK_CONFIGS=<...>"
 	@echo "  make benchmark-replay        Compare MODEL_REFS='run1 run2 ...'"
@@ -102,8 +102,7 @@ predict-next-day:
 		--dataset-key "$(DATASET_KEY)" \
 		--historical-csv "$(HISTORICAL_CSV)" \
 		--weather-csv "$(WEATHER_CSV)" \
-		--holidays-xlsx "$(HOLIDAYS_XLSX)" \
-		--target-date "$(TARGET_DATE)"
+		--holidays-xlsx "$(HOLIDAYS_XLSX)" $(if $(strip $(TARGET_DATE)),--target-date "$(TARGET_DATE)")
 
 replay-period:
 	$(RUN) scripts/replay_period.py \
