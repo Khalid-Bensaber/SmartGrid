@@ -68,7 +68,7 @@ Impact to check:
 - `load_old_benchmark()` currently produces a total-only legacy forecast comparison
 - notebook exports and reporting helpers assume total forecast naming
 - any API responses still labeled `Ptot_TOTAL_Forecast` will need renaming or a target-aware schema
-
+  
 ## Change The Aggregation Logic
 
 Current behavior:
@@ -82,7 +82,7 @@ If you need a different aggregation rule:
 2. Decide whether missing source columns should fail hard, produce `NA`, or use a different policy.
 3. Update any documentation or benchmark assumptions that still talk about “total” semantics.
 
-Do not silently change the current `tot` meaning without also retraining every affected bundle.
+A very simple way to change the code would be to overwrite the total by the actual value of the desired building, while still keeping the variable named `tot`. Do not silently change the current `tot` meaning without also retraining every affected bundle.
 
 ## Change The Set Of Lag Days
 

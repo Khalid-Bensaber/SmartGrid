@@ -161,6 +161,12 @@ The migration target is not “teach every module about Cassandra.”
 
 The migration target is “replace storage access while preserving SmartGrid’s current dataframe contract and strict day-ahead semantics.”
 
+Most of the data is injected via CSV files into pandas meaning that the only line that must change to add the cassandra connexion is the import of that csv into pands. The only big requirements is that it has to be the same format as the csv.
+
+```python
+df = pd.read_csv(csv_path)
+ ```
+
 ## Documentation Index
 
 - [README.md](../README.md)

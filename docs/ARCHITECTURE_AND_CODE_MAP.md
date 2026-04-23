@@ -61,7 +61,50 @@ Tracked demo and evaluation datasets. The active consumption pipeline reads from
 
 ### `artifacts/`
 
-Generated outputs, logs, replays, forecasts, benchmarks, promoted bundles, and notebook exports.
+Generated outputs, logs, promoted bundles, forecasts, replays, benchmark outputs, and notebook exports.
+
+This folder is the main runtime output area of the repository. It is where training writes bundles, where promotion exposes the current model, and where forecast and replay commands persist their outputs.
+
+Important subfolders and files:
+
+- `artifacts/runs/consumption/<run_id>/`: the canonical persisted training bundle for one run.
+  This folder contains:
+  `model.pt` for the saved PyTorch checkpoint,
+  `x_scaler.pkl` and `y_scaler.pkl` for the fitted input and target scalers,
+  and `run_summary.json` for metadata such as config path, feature columns, feature config, metrics, split ranges, diagnostics, and output paths.
+- `artifacts/exports/consumption/<run_id>/`: training-side exports and offline diagnostics for one run.
+  Typical files include:
+  `run_summary.json`,
+  `offline_test_backtest.csv`,
+  `offline_test_selected_day_<date>.csv`,
+  `offline_test_total_forecast_consumption.csv`,
+  and `notebook_export_consumption.csv`.
+  It also contains legacy-compatible aliases such as `backtest.csv`, `selected_day_<date>.csv`, and `total_forecast_consumption.csv`.
+- `artifacts/models/consumption/current/`: the promoted bundle used by default for inference and API calls.
+  It mirrors the core run-bundle files:
+  `model.pt`,
+  `x_scaler.pkl`,
+  `y_scaler.pkl`,
+  and `run_summary.json`.
+  This is the operational entry point for `make predict-next-day`, replay, and the default API runtime.
+- `artifacts/forecasts/consumption/current/`: the latest forecast outputs, written as `forecast_<target_date>.csv`.
+- `artifacts/forecasts/consumption/archive/<run_id>/`: archived forecast outputs grouped by the model run that produced them.
+  This is useful when one run is used to generate many daily forecasts over time.
+- `artifacts/replays/consumption/<stamp>__<start>__<end>/`: outputs from one replay execution.
+  The main files are `replay_forecasts.csv` and `replay_metrics.json`.
+  When per-day writing is enabled, a `per_day/` subfolder stores one forecast CSV per target day.
+- `artifacts/benchmarks/consumption_feature_variants.csv`: the top-level CSV produced by the feature-benchmark script when multiple configs are trained and ranked together.
+- `artifacts/benchmarks/replay/<stamp>__<start>__<end>/`: replay benchmark outputs across several run bundles.
+  At the benchmark root, `replay_benchmark_summary.csv` gives the cross-model leaderboard and `replay_benchmark_manifest.json` records the benchmark scope.
+  Each model then gets its own subfolder containing `replay_forecasts.csv` and `replay_metrics.json`.
+- `artifacts/logs/train/`, `artifacts/logs/predict/`, `artifacts/logs/replay/`: execution logs grouped by operational channel.
+  File names usually include a UTC timestamp and the action or target date.
+- `artifacts/notebook_exports/cli_demo_v4/`: notebook-driven analysis outputs for the current demo flow.
+  Typical files include `metadata.json`, replay leaderboards, skipped-day audits, period comparison tables, worst-day summaries, and focused audit CSVs under subfolders such as `focused_audit/` and `daily_overlays/`.
+
+In practice, the artifact lifecycle is:
+
+`train` -> write `artifacts/runs/...` and `artifacts/exports/...` -> optionally promote to `artifacts/models/.../current` -> run forecast into `artifacts/forecasts/...` or replay into `artifacts/replays/...` -> aggregate comparisons into `artifacts/benchmarks/...`.
 
 ### `docs/`
 
@@ -73,7 +116,7 @@ Handoff, operations, architecture, customization, migration, and integration gui
 
 Shared utilities and constants.
 
-- `constants.py`: total-building columns, weather column groups, forecast cadence, and strict day-ahead constants
+- `constants.py`: total-building columns, weather column groups, forecast cadence, and strict day-ahead constants. This file is used to declare the constants of the project.
 - `paths.py`: standard output paths for runs, forecasts, and replays
 - `utils.py`: YAML loading, device selection, run id creation, and directory helpers
 - `logging.py`: log file path creation and logger setup
